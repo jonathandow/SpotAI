@@ -61,14 +61,33 @@ def create_playlist():
         genre = request.form.get('genre')
         num_clusters = int(request.form.get('num_clusters', '5'))
 
-        recommendations = []
+        top_artists = sp.current_user_top_artists(limit=5, time_range='medium_term')['items']
+        artist_ids = [a['id'] for a in top_artists]
+        artist_genres = [g for a in top_artists for g in a['genres']]
 
+        recommendations = []
+        rec_tracks = {item['id'] for item in sp.current_user_top_tracks(limit=50, time_range='medium_term')['items']}
+        def get_all_saved_tracks(sp):
+            saved = []
+            results = sp.current_user_saved_tracks(limit=50)
+            saved.extend(results['items'])
+            while results['next']:
+                results = sp.next(results)
+                saved.extend(results['items'])
+            return saved
+        liked_songs = get_all_saved_tracks(sp)
+        rec_tracks.update({item['track']['id'] for item in liked_songs})
         try:
-            recommended_tracks = sp.recommendations(seed_genres=[genre], limit=100)
+            recommended_tracks = sp.recommendations(seed_tracks=list(rec_tracks)[:1], seed_artists = artist_ids[:2], seed_genres = artist_genres[:2], limit=100)
         except spotipy.exceptions.SpotifyException as e:
             return jsonify({'error': str(e)}), 500
 
         track_ids = [track['id'] for track in recommended_tracks['tracks']]
+        count = 0
+        for track in recommended_tracks['tracks']:
+            count += 1
+            print(track)
+        print(count)
 
         try:
             features = get_audio_features_for_tracks(sp, track_ids)
@@ -103,8 +122,13 @@ def create_playlist():
         if not playlist_id:
             new_playlist = sp.user_playlist_create(user=user_id, name=playlist_name, public=True, description=playlist_description)
             playlist_id = new_playlist['id']
-        
-        sp.user_playlist_add_tracks(user=user_id, playlist_id=playlist_id, tracks=recommendations)
+        c = 0
+        for r in recommendations:
+            c += 1
+        print("Recs: \n")
+        print(c)
+        uris = [song['uri'] for song in recommended_tracks['tracks']]
+        sp.playlist_add_items(playlist_id = playlist_id, items = uris)
 
         return render_template('playlist.html', playlist_name=playlist_name, playlist_url=f"https://open.spotify.com/playlist/{playlist_id}")
     
