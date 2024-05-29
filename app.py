@@ -1,5 +1,7 @@
 import spotipy
 import os
+import random
+from collections import Counter
 from spotipy.oauth2 import SpotifyOAuth
 import pandas as pd
 from sklearn.cluster import KMeans
@@ -37,7 +39,11 @@ def callback():
     code = request.args.get('code')
     token = sp.auth_manager.get_access_token(code)
     session['token'] = token
-    return redirect(url_for('create_playlist'))
+    return redirect(url_for('homepage'))
+
+@app.route('/homepage')
+def homepage():
+    return render_template('homepage.html')
 
 def get_token():
     token = session.get('token', None)
@@ -60,6 +66,15 @@ def get_all_top_tracks(sp):
         top.extend(results['items'])
     return top
 
+def get_playlist_tracks(sp, playlist_id):
+    tracks = []
+    results = sp.playlist_tracks(playlist_id, limit=100)
+    tracks.extend(results['items'])
+    while results['next']:
+        results = sp.next(results)
+        tracks.extend(results['items'])
+    return tracks
+
 def get_recent_tracks(sp):
     recents = []
     results = sp.current_user_recently_played(limit=50)
@@ -77,6 +92,87 @@ def get_all_saved_tracks(sp):
         results = sp.next(results)
         saved.extend(results['items'])
     return saved
+
+@app.route('/create_playlist_from_playlist', methods=['GET', 'POST'])
+def create_playlist_from_playlist():
+    token = get_token()
+    if not token:
+        return redirect(url_for('login'))
+    if request.method == 'POST':
+        selected_playlist_id = request.form.get('playlist_id')
+        playlist_name = request.form.get('playlist_name')
+        num_clusters = 100
+        num_iterations = 10
+
+        tracks = get_playlist_tracks(sp, selected_playlist_id)
+
+        liked_songs = get_all_saved_tracks(sp)
+        recent_songs = get_recent_tracks(sp)
+        top_songs = get_all_top_tracks(sp)
+
+        known_tracks = {item['track']['id'] for item in liked_songs}
+        known_tracks.update({item['track']['id'] for item in recent_songs})
+        known_tracks.update({item['id'] for item in top_songs})
+
+        track_ids = [track['track']['id'] for track in tracks]
+
+        try:
+            features = get_audio_features_for_tracks(sp, track_ids[:100])
+        except spotipy.exceptions.SpotifyException as e:
+            return jsonify({'error': str(e)}), 500
+        
+        features_df = pd.DataFrame(features)
+
+        X = features_df[['danceability', 'energy', 'key', 'loudness', 'mode', 'speechiness', 'acousticness', 'instrumentalness', 'liveness', 'valence', 'tempo']]
+
+        kmeans = KMeans(n_clusters=num_clusters, random_state=42)
+        kmeans.fit(X)
+
+        features_df['cluster'] = kmeans.labels_
+
+        centroids = kmeans.cluster_centers_
+
+        recommendations = []
+        for i in range(num_clusters):
+            centroid = centroids[i]
+            cluster_tracks = features_df[features_df['cluster'] == i]
+            closest_index = ((cluster_tracks[X.columns] - centroid) ** 2).sum(axis=1).idxmin()
+            closest_id = track_ids[int(closest_index)]
+            recommendations.append(closest_id)
+        user_id = sp.me()['id']
+        playlist_description = f"SpotAI Recommendations. Based on {sp.playlist(selected_playlist_id)['name']}. Updated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}."
+        playlists = sp.user_playlists(user_id)['items']
+        playlist_id = None
+        for playlist in playlists:
+            if playlist['name'] == playlist_name:
+                playlist_id = playlist['id']
+                sp.playlist_replace_items(playlist_id, [])
+                sp.playlist_change_details(playlist_id, description=playlist_description)
+                break
+        if not playlist_id:
+            new_playlist = sp.user_playlist_create(user=user_id, name=playlist_name, public=True, description=playlist_description)
+            playlist_id = new_playlist['id']
+        rec_counter = Counter()
+        for _ in range(num_iterations):
+            random_tracks = []
+            for x in range(1, 6):
+                random_tracks.append(random.choice(recommendations))
+            try:
+                recommended_tracks = sp.recommendations(seed_tracks=recommendations[:5], limit=100)
+            except spotipy.exceptions.SpotifyException as e:
+                return jsonify({'error': str(e)}), 500
+        
+            new_recommendations = [track['id'] for track in recommended_tracks['tracks'] if track['id'] not in known_tracks]
+            rec_counter.update(new_recommendations)
+
+        most_common_recommendations = [track_id for track_id, count in rec_counter.most_common(100)]
+        sp.user_playlist_add_tracks(user=user_id, playlist_id=playlist_id, tracks=most_common_recommendations)
+
+        return render_template('playlist.html', playlist_name=playlist_name, playlist_url=f"https://open.spotify.com/playlist/{playlist_id}")
+    
+    else:
+        playlists = sp.current_user_playlists(limit=50)['items']
+        return render_template('select_playlist.html', playlists=playlists)
 
 @app.route('/create_playlist', methods=['GET', 'POST'])
 def create_playlist():
@@ -141,15 +237,22 @@ def create_playlist():
         if not playlist_id:
             new_playlist = sp.user_playlist_create(user=user_id, name=playlist_name, public=True, description=playlist_description)
             playlist_id = new_playlist['id']
+        rec_counter = Counter()
+        for _ in range(num_iterations):
+            random_tracks = []
+            for x in range(1, 6):
+                random_tracks.append(random.choice(recommendations))
+            try:
+                recommended_tracks = sp.recommendations(seed_tracks=recommendations[:5], limit=100)
+            except spotipy.exceptions.SpotifyException as e:
+                return jsonify({'error': str(e)}), 500
         
-        try:
-            recommended_tracks = sp.recommendations(seed_tracks=recommendations[:5], limit=100)
-        except spotipy.exceptions.SpotifyException as e:
-            return jsonify({'error': str(e)}), 500
+            new_recommendations = [track['id'] for track in recommended_tracks['tracks'] if track['id'] not in known_tracks]
+            rec_counter.update(new_recommendations)
         
-        new_recommendations = [track['id'] for track in recommended_tracks['tracks'] if track['id'] not in known_tracks]
+        most_common_recommendations = [track_id for track_id, count in rec_counter.most_common(100)]
 
-        sp.user_playlist_add_tracks(user=user_id, playlist_id=playlist_id, tracks=new_recommendations)
+        sp.user_playlist_add_tracks(user=user_id, playlist_id=playlist_id, tracks=most_common_recommendations)
 
         return render_template('playlist.html', playlist_name=playlist_name, playlist_url=f"https://open.spotify.com/playlist/{playlist_id}")
     

@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>SpotAI</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            margin-top: 50px;
+        }
+        .button {
+            display: inline-block;
+            padding: 10px 20px;
+            font-size: 18px;
+            margin: 10px;
+            color: #fff;
+            background-color: #1DB954;
+            border: none;
+            border-radius: 5px;
+            text-decoration: none;
+        }
+        .button:hover {
+            background-color: #1ed760;
+        }
+    </style>
+</head>
+<body>
+    <h1>Welcome to SpotAI</h1>
+    <a href="{{ url_for('create_playlist') }}" class="button">Create Playlist</a>
+    <a href="{{ url_for('create_playlist_from_playlist') }}" class="button">Create Playlist from Playlist</a>
+</body>
+</html>
