@@ -20,7 +20,7 @@ app = Flask(__name__)
 app.secret_key = os.urandom(24)
 app.config['SESSION_COOKIE_NAME'] = 'SpotAI'
 
-file_path = "C:/Users/dowms/SpotAI/info.txt"
+file_path = "/Users/cshafizadeh/SpotAI/info.txt"
 
 with open(file_path, 'r') as f:
     CLIENT_ID = f.readline().strip()

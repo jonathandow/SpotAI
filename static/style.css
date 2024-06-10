@@ -8,6 +8,14 @@ body {
   overflow: auto;
 }
 
+.serif {
+  font-family: sans-serif !important;
+  font-optical-sizing: auto;
+  font-weight: 200;
+  font-style: normal;
+  font-variation-settings: 'slnt' 0;
+}
+
 .inter-light {
   font-family: 'Inter', sans-serif !important;
   font-optical-sizing: auto;

@@ -33,17 +33,17 @@
       href="{{ url_for('static', filename='style.css') }}"
     />
   </head>
-  <body class="bg-dark text-light inter-light">
+  <body class="bg-dark text-light serif">
     {% include 'navbar.html' %}
-    <div class="container text-center inter-light">
+    <div class="container text-center serif">
       <h1 class="m-5">A playlist that gets you...</h1>
-      <h2 class="m-5 inter-light">
+      <h2 class="m-5 serif">
         AI generated personalized playlists based on your tastes
       </h2>
       <div class="d-flex justify-content-center">
         <span class="p-3 button badge rounded-pill bg-green">
           <a
-            class="inter-light"
+            class="serif"
             style="color: white; text-decoration: none; font-size: xx-large"
             href="{{ url_for('login') }}"
             >Login with Spotify</a
