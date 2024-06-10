@@ -20,7 +20,7 @@ app = Flask(__name__)
 app.secret_key = os.urandom(24)
 app.config['SESSION_COOKIE_NAME'] = 'SpotAI'
 
-file_path = "/Users/cshafizadeh/SpotAI/info.txt"
+file_path = "./info.txt"
 
 with open(file_path, 'r') as f:
     CLIENT_ID = f.readline().strip()
@@ -321,7 +321,13 @@ def index():
 @app.route('/login')
 def login():
     auth_url = spot_ai.sp.auth_manager.get_authorize_url()
+    print(auth_url)
     return redirect(auth_url)
+
+@app.route('/logout')
+def logout():
+    session.clear()
+    return redirect(url_for('index'))
 
 @app.route('/callback')
 def callback():
@@ -329,10 +335,15 @@ def callback():
     code = request.args.get('code')
     token = spot_ai.sp.auth_manager.get_access_token(code)
     session['token'] = token
+    user_info = spot_ai.sp.current_user()
+    session['user_name'] = user_info['display_name']
+    session['user_image'] = user_info['images'][0]['url'] if user_info['images'] else None
+    print("Token", token)
     return redirect(url_for('homepage'))
 
 @app.route('/homepage')
 def homepage():
+    print("session:", session)
     return render_template('homepage.html')
 
 @app.route('/create_playlist', methods=['GET', 'POST'])
@@ -359,4 +370,4 @@ def create_playlist_from_playlist():
         return render_template('select_playlist.html', playlists=playlists)
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(port=5000, debug=True)

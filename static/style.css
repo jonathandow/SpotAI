@@ -1,6 +1,6 @@
 body {
   min-height: 100vh;
-  background-image: url('/static/img/background.png');
+  background-image: url('/static/img/background.gif');
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
@@ -28,6 +28,10 @@ body {
   background-color: #1db954;
 }
 
+.bg-spotify-black {
+  background-color: #191414;
+}
+
 .button {
   cursor: pointer;
   transition: all 0.3s ease; /* Smooth transition */
@@ -37,4 +41,20 @@ body {
   transform: scale(1.1); /* Slightly increase the size */
   background-color: #00dd4e; /* Slightly darker green */
   border: 1px solid#ffffff;
+}
+
+.button-text {
+  color: white;
+  text-decoration: none;
+  font-size: xx-large;
+}
+
+.navbar .navbar-nav .nav-item img {
+  margin-left: 10px;
+  border-radius: 50%;
+}
+
+.navbar .dropdown-menu {
+  right: 0;
+  left: auto;
 }

@@ -1,22 +1,36 @@
 <nav
-  class="navbar navbar-dark bg-dark navbar-expand-lg navbar-light bg-light p-3 border-bottom border-white"
+  class="navbar navbar-dark bg-spotify-black navbar-expand-lg p-3 border-bottom border-white"
 >
-  <a class="navbar-brand" href="#">SpotAI</a>
-  <button
-    class="navbar-toggler"
-    type="button"
-    data-toggle="collapse"
-    data-target="#navbarNavAltMarkup"
-    aria-controls="navbarNavAltMarkup"
-    aria-expanded="false"
-    aria-label="Toggle navigation"
-  >
-    <span class="navbar-toggler-icon"></span>
-  </button>
-  <div class="collapse navbar-collapse" id="navbarNavAltMarkup">
-    <div class="navbar-nav">
-      <a class="nav-item nav-link" href="#">Login</a>
-      <a class="nav-item nav-link disabled" href="#">Disabled</a>
+  <div class="container-fluid">
+    <a class="navbar-brand" href="#">SpotAI</a>
+    <button
+      class="navbar-toggler"
+      type="button"
+      data-toggle="collapse"
+      data-target="#navbarNavAltMarkup"
+      aria-controls="navbarNavAltMarkup"
+      aria-expanded="false"
+      aria-label="Toggle navigation"
+    >
+      <span class="navbar-toggler-icon"></span>
+    </button>
+    <div class="collapse navbar-collapse" id="navbarNavAltMarkup">
+      <div class="navbar-nav ml-auto">
+        {% if session.get('token') %} {% if session['user_image'] %}
+        <img
+          src="{{ session['user_image'] }}"
+          alt="Profile Picture"
+          class="rounded-circle"
+          width="40"
+          height="40"
+        />
+        {% endif %}
+        <span class="nav-item nav-link">{{ session['user_name'] }}</span>
+        <a class="nav-item nav-link" href="{{ url_for('logout') }}">Logout</a>
+        {% else %}
+        <a class="nav-item nav-link" href="{{ url_for('login') }}">Login</a>
+        {% endif %}
+      </div>
     </div>
   </div>
 </nav>
