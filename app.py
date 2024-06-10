@@ -1,6 +1,6 @@
 import os
 import random
-from collections import Counter
+from collections import Counter, defaultdict
 from datetime import datetime
 import pandas as pd
 from sklearn.cluster import KMeans
@@ -33,6 +33,7 @@ class SpotAI:
 
     @retry(wait=wait_exponential(multiplier=1, min=4, max=60), stop=stop_after_attempt(10))
     def get_audio_features_for_tracks(self, track_ids):
+        print("getting audio features")
         features = []
         for i in range(0, len(track_ids), 100):
             chunk = track_ids[i:i + 100]
@@ -40,6 +41,7 @@ class SpotAI:
         return features
 
     def get_all_top_tracks(self):
+        print("getting top tracks")
         top = []
         results = self.sp.current_user_top_tracks(limit=50, time_range='medium_term')
         top.extend(results['items'])
@@ -49,6 +51,7 @@ class SpotAI:
         return top
 
     def get_playlist_tracks(self, playlist_id):
+        print("getting playlist tracks")
         tracks = []
         results = self.sp.playlist_tracks(playlist_id, limit=100)
         tracks.extend(results['items'])
@@ -58,6 +61,7 @@ class SpotAI:
         return tracks
 
     def get_recent_tracks(self):
+        print("getting recent tracks")
         recents = []
         results = self.sp.current_user_recently_played(limit=50)
         recents.extend(results['items'])
@@ -67,6 +71,7 @@ class SpotAI:
         return recents
 
     def get_all_saved_tracks(self):
+        print("getting saved tracks")
         saved = []
         results = self.sp.current_user_saved_tracks(limit=50)
         saved.extend(results['items'])
@@ -74,6 +79,7 @@ class SpotAI:
             results = self.sp.next(results)
             saved.extend(results['items'])
         return saved
+
 
     def create_playlist(self, playlist_name, num_clusters=5, num_iterations=10):
         top_artists = self.sp.current_user_top_artists(limit=5, time_range='medium_term')['items']
@@ -90,7 +96,7 @@ class SpotAI:
         known_tracks.update({item['track']['id'] for item in recent_songs})
         known_tracks.update({item['id'] for item in top_songs})
 
-        track_ids = [track['id'] for track in top_songs[:50]]
+        track_ids = [track['id'] for track in top_songs[:200]]
 
         try:
             features = self.get_audio_features_for_tracks(track_ids)
@@ -101,14 +107,22 @@ class SpotAI:
             return jsonify({'error': "No audio features retrieved for the tracks"}), 500
 
         features_df = pd.DataFrame(features)
-        X = features_df[['danceability', 'energy', 'key', 'loudness', 'mode', 'speechiness', 'acousticness', 'instrumentalness', 'liveness', 'valence', 'tempo']]
+        # X = features_df[['danceability', 'energy', 'key', 'loudness', 'mode', 'speechiness', 'acousticness', 'instrumentalness', 'liveness', 'valence', 'tempo']]
+        
+        plays = Counter(track_ids)
 
+        max_plays = max(plays.values())
+        features_df['play count'] = features_df['id'].apply(lambda x: plays[x] / max_plays)
+
+        feature_columns = ['danceability', 'energy', 'key', 'loudness', 'mode', 'speechiness', 'acousticness', 'instrumentalness', 'liveness', 'valence', 'tempo', 'play count']
+        X = features_df[feature_columns]
+        print("Scaler...")
         scaler = StandardScaler()
         X_scaled = scaler.fit_transform(X)
-        
+        print("PCA...")
         pca = PCA(n_components=5)
         X_pca = pca.fit_transform(X_scaled)
-
+        print("GMM...")
         gmm = GaussianMixture(n_components=num_clusters, random_state=42)
         gmm.fit(X_pca)
         features_df['cluster'] = gmm.predict(X_pca)
@@ -119,7 +133,7 @@ class SpotAI:
         # kmeans.fit(X)
         # features_df['cluster'] = kmeans.labels_
         # centroids = kmeans.cluster_centers_
-
+        print("Recommendations...")
         recommendations = []
         for i in range(num_clusters):
             centroid = centroids[i]
@@ -187,7 +201,15 @@ class SpotAI:
             return jsonify({'error': "No audio features retrieved for the tracks"}), 500
 
         features_df = pd.DataFrame(features)
-        X = features_df[['danceability', 'energy', 'key', 'loudness', 'mode', 'speechiness', 'acousticness', 'instrumentalness', 'liveness', 'valence', 'tempo']]
+        # X = features_df[['danceability', 'energy', 'key', 'loudness', 'mode', 'speechiness', 'acousticness', 'instrumentalness', 'liveness', 'valence', 'tempo']]
+
+        plays = Counter(track_ids)
+
+        max_plays = max(plays.values())
+        features_df['play count'] = features_df['id'].apply(lambda x: plays[x] / max_plays)
+        
+        feature_columns = ['danceability', 'energy', 'key', 'loudness', 'mode', 'speechiness', 'acousticness', 'instrumentalness', 'liveness', 'valence', 'tempo', 'play count']
+        X = features_df[feature_columns]
 
         scaler = StandardScaler()
         X_scaled = scaler.fit_transform(X)
