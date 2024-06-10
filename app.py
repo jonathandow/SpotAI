@@ -1,6 +1,6 @@
 import os
 import random
-from collections import Counter, defaultdict
+from collections import Counter
 from datetime import datetime
 import pandas as pd
 from sklearn.cluster import KMeans
@@ -140,11 +140,24 @@ class SpotAI:
         print("PCA...")
         pca = PCA(n_components=5)
         X_pca = pca.fit_transform(X_scaled)
+        print("KMeans...")
+        kmeans = KMeans(n_clusters=num_clusters, random_state=42)
+        kmeans.fit(X_pca)
+        features_df['kmeans_cluster'] = kmeans.labels_
+        centroids_kmeans = kmeans.cluster_centers_
         print("GMM...")
         gmm = GaussianMixture(n_components=num_clusters, random_state=42)
         gmm.fit(X_pca)
         features_df['cluster'] = gmm.predict(X_pca)
         centroids = gmm.means_
+
+        kmeans_weights = np.bincount(features_df['kmeans_cluster'])
+        gmm_weights = np.bincount(features_df['cluster'])
+
+        weighted_kmeans_centroids = np.dot(kmeans_weights, centroids_kmeans) / np.sum(kmeans_weights)
+        weighted_gmm_centroids = np.dot(gmm_weights, centroids) / np.sum(gmm_weights)
+
+        combined_centroids = (weighted_kmeans_centroids + weighted_gmm_centroids) / 2
 
         # OLD IMPLEMENTATION (TESTING)
         # kmeans = KMeans(n_clusters=num_clusters, random_state=42)
@@ -154,7 +167,7 @@ class SpotAI:
         print("Recommendations...")
         recommendations = []
         for i in range(num_clusters):
-            centroid = centroids[i]
+            centroid = combined_centroids[i]
             cluster_tracks = features_df[features_df['cluster'] == i]
             cluster_tracks_pca = X_pca[features_df['cluster'] == i]
             centroid_array = np.array(centroid)
@@ -235,10 +248,23 @@ class SpotAI:
         pca = PCA(n_components=5)
         X_pca = pca.fit_transform(X_scaled)
 
+        kmeans = KMeans(n_clusters=num_clusters, random_state=42)
+        kmeans.fit(X_pca)
+        features_df['kmeans_cluster'] = kmeans.labels_
+        centroids_kmeans = kmeans.cluster_centers_
+
         gmm = GaussianMixture(n_components=num_clusters, random_state=42)
         gmm.fit(X_pca)
         features_df['cluster'] = gmm.predict(X_pca)
         centroids = gmm.means_
+
+        kmeans_weights = np.bincount(features_df['kmeans_cluster'])
+        gmm_weights = np.bincount(features_df['cluster'])
+
+        weighted_kmeans_centroids = np.dot(kmeans_weights, centroids_kmeans) / np.sum(kmeans_weights)
+        weighted_gmm_centroids = np.dot(gmm_weights, centroids) / np.sum(gmm_weights)
+
+        combined_centroids = (weighted_kmeans_centroids + weighted_gmm_centroids) / 2
 
         # kmeans = KMeans(n_clusters=num_clusters, random_state=42)
         # kmeans.fit(X)
@@ -247,7 +273,7 @@ class SpotAI:
 
         recommendations = []
         for i in range(num_clusters):
-            centroid = centroids[i]
+            centroid = combined_centroids[i]
             cluster_tracks = features_df[features_df['cluster'] == i]
             cluster_tracks_pca = X_pca[features_df['cluster'] == i]
             centroid_array = np.array(centroid)
