@@ -12,9 +12,23 @@ from flask import Flask, redirect, request, session, url_for, render_template, j
 from tenacity import retry, wait_exponential, stop_after_attempt
 import spotipy
 from spotipy.oauth2 import SpotifyOAuth
+from flask_caching import Cache
 
 #OPTIMAL CLUSTERS: 4-5
 #FIGURING OUT OPTIMAL ITERATIONS
+app = Flask(__name__)
+app.secret_key = os.urandom(24)
+app.config['SESSION_COOKIE_NAME'] = 'SpotAI'
+
+file_path = "C:/Users/dowms/SpotAI/info.txt"
+
+with open(file_path, 'r') as f:
+    CLIENT_ID = f.readline().strip()
+    CLIENT_SECRET = f.readline().strip()
+
+REDIRECT_URI = "http://localhost:5000/callback"
+
+cache = Cache(app, config={'CACHE_TYPE': 'SimpleCache', 'CACHE_DEFAULT_TIMEOUT': 3600})
 
 class SpotAI:
     def __init__(self, client_id, client_secret, redirect_uri):
@@ -39,7 +53,8 @@ class SpotAI:
             chunk = track_ids[i:i + 100]
             features.extend(self.sp.audio_features(chunk))
         return features
-
+    
+    @cache.cached(timeout=3600, key_prefix='top_tracks')
     def get_all_top_tracks(self):
         print("getting top tracks")
         top = []
@@ -50,6 +65,7 @@ class SpotAI:
             top.extend(results['items'])
         return top
 
+    @cache.cached(timeout=3600, key_prefix='playlist_tracks')
     def get_playlist_tracks(self, playlist_id):
         print("getting playlist tracks")
         tracks = []
@@ -60,6 +76,7 @@ class SpotAI:
             tracks.extend(results['items'])
         return tracks
 
+    @cache.cached(timeout=3600, key_prefix='recent_tracks')
     def get_recent_tracks(self):
         print("getting recent tracks")
         recents = []
@@ -70,6 +87,7 @@ class SpotAI:
             recents.extend(results['items'])
         return recents
 
+    @cache.cached(timeout=3600, key_prefix='saved_tracks')
     def get_all_saved_tracks(self):
         print("getting saved tracks")
         saved = []
@@ -267,18 +285,6 @@ class SpotAI:
         self.sp.user_playlist_add_tracks(user=user_id, playlist_id=playlist_id, tracks=most_common_recommendations)
 
         return render_template('playlist.html', playlist_name=playlist_name, playlist_url=f"https://open.spotify.com/playlist/{playlist_id}")
-
-app = Flask(__name__)
-app.secret_key = os.urandom(24)
-app.config['SESSION_COOKIE_NAME'] = 'SpotAI'
-
-file_path = "C:/Users/dowms/SpotAI/info.txt"
-
-with open(file_path, 'r') as f:
-    CLIENT_ID = f.readline().strip()
-    CLIENT_SECRET = f.readline().strip()
-
-REDIRECT_URI = "http://localhost:5000/callback"
 
 spot_ai = SpotAI(client_id=CLIENT_ID, client_secret=CLIENT_SECRET, redirect_uri="http://localhost:5000/callback")
 
