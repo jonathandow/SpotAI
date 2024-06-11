@@ -45,7 +45,7 @@ class SpotAI:
             token = self.sp.auth_manager.refresh_token(token['refresh_token'])
         return token
 
-    @retry(wait=wait_exponential(multiplier=1, min=4, max=60), stop=stop_after_attempt(10))
+    @cache.cached(timeout=3600, key_prefix='audio_features')
     def get_audio_features_for_tracks(self, track_ids):
         print("getting audio features")
         features = []
@@ -102,10 +102,12 @@ class SpotAI:
     def create_playlist(self, playlist_name, num_clusters=5, num_iterations=10):
         top_artists = self.sp.current_user_top_artists(limit=5, time_range='medium_term')['items']
 
+        #getting all tracks form user's library (thinking of not using recent_songs not sure)
         liked_songs = self.get_all_saved_tracks()
         recent_songs = self.get_recent_tracks()
         top_songs = self.get_all_top_tracks()
 
+        #appending all of these tracks to check if the user already knows them
         known_names = {item['track']['name'] for item in liked_songs}
         known_names.update({item['track']['name'] for item in recent_songs})
         known_names.update({item['name'] for item in top_songs})
@@ -115,7 +117,7 @@ class SpotAI:
         known_tracks.update({item['id'] for item in top_songs})
 
         track_ids = [track['id'] for track in top_songs[:200]]
-
+        #getting audio features for the tracks
         try:
             features = self.get_audio_features_for_tracks(track_ids)
         except spotipy.exceptions.SpotifyException as e:
@@ -126,31 +128,37 @@ class SpotAI:
 
         features_df = pd.DataFrame(features)
         # X = features_df[['danceability', 'energy', 'key', 'loudness', 'mode', 'speechiness', 'acousticness', 'instrumentalness', 'liveness', 'valence', 'tempo']]
-        
-        plays = Counter(track_ids)
 
+        plays = Counter(track_ids)
+        #normalizing the play count
         max_plays = max(plays.values())
         features_df['play count'] = features_df['id'].apply(lambda x: plays[x] / max_plays)
-
+        #selecting the features to be used for clustering
         feature_columns = ['danceability', 'energy', 'key', 'loudness', 'mode', 'speechiness', 'acousticness', 'instrumentalness', 'liveness', 'valence', 'tempo', 'play count']
         X = features_df[feature_columns]
         print("Scaler...")
+        #scaling the features
         scaler = StandardScaler()
         X_scaled = scaler.fit_transform(X)
         print("PCA...")
+        #applying PCA to reduce the dimensions
         pca = PCA(n_components=5)
         X_pca = pca.fit_transform(X_scaled)
         print("KMeans...")
+        #applying KMeans clustering
         kmeans = KMeans(n_clusters=num_clusters, random_state=42)
         kmeans.fit(X_pca)
         features_df['kmeans_cluster'] = kmeans.labels_
         centroids_kmeans = kmeans.cluster_centers_
         print("GMM...")
+        #applying GMM clustering
         gmm = GaussianMixture(n_components=num_clusters, random_state=42)
         gmm.fit(X_pca)
         features_df['cluster'] = gmm.predict(X_pca)
         centroids = gmm.means_
 
+
+        #combining the centroids of KMeans and GMM
         kmeans_weights = np.bincount(features_df['kmeans_cluster'])
         gmm_weights = np.bincount(features_df['cluster'])
 
@@ -165,6 +173,7 @@ class SpotAI:
         # features_df['cluster'] = kmeans.labels_
         # centroids = kmeans.cluster_centers_
         print("Recommendations...")
+        #getting the recommendations
         recommendations = []
         for i in range(num_clusters):
             centroid = combined_centroids[i]
@@ -191,7 +200,7 @@ class SpotAI:
             playlist_id = new_playlist['id']
 
         rec_counter = Counter()
-        for _ in range(num_iterations):
+        for x in range(num_iterations):
             random_tracks = random.sample(recommendations, min(5, len(recommendations)))
             try:
                 recommended_tracks = self.sp.recommendations(seed_tracks=random_tracks, limit=100)
@@ -209,19 +218,36 @@ class SpotAI:
     def create_playlist_from_playlist(self, selected_playlist_id, playlist_name, num_clusters=5, num_iterations=10):
         tracks = self.get_playlist_tracks(selected_playlist_id)
 
+        for item in tracks:
+            if item and 'track' in item and item['track']:
+                track_name = item['track'].get('name')
+                print(track_name)
+            else:
+                print("Invalid track:", item)
+
+        track_ids = []
+        for track in tracks:
+            if track is not None and 'track' in track and track['track'] is not None:
+                track_ids.append(track['track']['id'])
+            else:
+                print(f"Skipping Invalid track: {track}")
+
+        if not track_ids:
+            return jsonify({'error': "No valid tracks found in the playlist"}), 500
+
         liked_songs = self.get_all_saved_tracks()
         recent_songs = self.get_recent_tracks()
         top_songs = self.get_all_top_tracks()
 
         known_names = {item['track']['name'] for item in liked_songs}
-        known_names.update({item['track']['name'] for item in recent_songs})
+        known_names.update({item['track']['name'] for item in recent_songs[:100]})
         known_names.update({item['name'] for item in top_songs})
 
         known_tracks = {item['track']['id'] for item in liked_songs}
-        known_tracks.update({item['track']['id'] for item in recent_songs})
+        known_tracks.update({item['track']['id'] for item in recent_songs[:100]})
         known_tracks.update({item['id'] for item in top_songs})
 
-        track_ids = [track['track']['id'] for track in tracks]
+        # track_ids = [track['track']['id'] for track in tracks]
 
         try:
             features = self.get_audio_features_for_tracks(track_ids)
@@ -281,7 +307,6 @@ class SpotAI:
             closest_index = np.argmin(np.sum((cluster_tracks_pca - centroid_array) ** 2, axis=1))
             closest_id = track_ids[cluster_tracks.index[closest_index]]
             recommendations.append(closest_id)
-
         user_id = self.sp.me()['id']
         playlist_description = f"SpotAI Recommendations. Based on {self.sp.playlist(selected_playlist_id)['name']}. Updated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}."
         playlists = self.sp.user_playlists(user_id)['items']
@@ -297,10 +322,10 @@ class SpotAI:
             playlist_id = new_playlist['id']
 
         rec_counter = Counter()
-        for _ in range(num_iterations):
+        for x in range(num_iterations):
             random_tracks = random.sample(recommendations, min(5, len(recommendations)))
             try:
-                recommended_tracks = self.sp.recommendations(seed_tracks=recommendations[:5], limit=100)
+                recommended_tracks = self.sp.recommendations(seed_tracks=random_tracks[:5], limit=100)
             except spotipy.exceptions.SpotifyException as e:
                 return jsonify({'error': str(e)}), 500
 
@@ -309,7 +334,8 @@ class SpotAI:
 
         most_common_recommendations = [track_id for track_id, count in rec_counter.most_common(100)]
         self.sp.user_playlist_add_tracks(user=user_id, playlist_id=playlist_id, tracks=most_common_recommendations)
-
+        cache.delete(f'playlist_tracks_{selected_playlist_id}')
+        print("Cache deleted")
         return render_template('playlist.html', playlist_name=playlist_name, playlist_url=f"https://open.spotify.com/playlist/{playlist_id}")
 
 spot_ai = SpotAI(client_id=CLIENT_ID, client_secret=CLIENT_SECRET, redirect_uri="http://localhost:5000/callback")
