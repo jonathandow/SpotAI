@@ -12,25 +12,45 @@
       aria-expanded="false"
       aria-label="Toggle navigation"
     >
-      <span class="navbar-toggler-icon"></span>
+      <img
+        src="{{ session['user_image'] if session['user_image'] else url_for('static', filename='img/DefaultProfileImage.svg') }}"
+        alt="Profile Picture"
+        class="rounded-circle"
+        width="40"
+        height="40"
+      />
     </button>
-    <div class="collapse navbar-collapse" id="navbarNavAltMarkup">
-      <div class="navbar-nav ml-auto">
-        {% if session.get('token') %} {% if session['user_image'] %}
-        <img
-          src="{{ session['user_image'] }}"
-          alt="Profile Picture"
-          class="rounded-circle"
-          width="40"
-          height="40"
-        />
-        {% endif %}
-        <span class="nav-item nav-link">{{ session['user_name'] }}</span>
-        <a class="nav-item nav-link" href="{{ url_for('logout') }}">Logout</a>
-        {% else %}
-        <a class="nav-item nav-link" href="{{ url_for('login') }}">Login</a>
-        {% endif %}
+    <div class="collapse navbar-collapse" id="navbarNavDropdown">
+      {% if session.get('token') %}
+      <div class="nav-item dropdown">
+        <a
+          class="nav-link dropdown-toggle"
+          href="#"
+          id="navbarDropdownMenuLink"
+          role="button"
+          data-bs-toggle="dropdown"
+          aria-expanded="false"
+        >
+          <img
+            src="{{ session['user_image'] if session['user_image'] else url_for('static', filename='img/DefaultProfileImage.svg') }}"
+            alt="Profile Picture"
+            class="rounded-circle"
+            width="40"
+            height="40"
+          />
+        </a>
+        <ul class="dropdown-menu" aria-labelledby="navbarDropdownMenuLink">
+          <li><p>{{session['user_name']}}</p></li>
+          <li>
+            <a class="nav-item nav-link" href="{{ url_for('logout') }}"
+              >Logout</a
+            >
+          </li>
+        </ul>
       </div>
+      {% else %}
+      <a class="nav-item nav-link" href="{{ url_for('login') }}">Login</a>
+      {% endif %}
     </div>
   </div>
 </nav>
