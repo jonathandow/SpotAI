@@ -1,13 +1,14 @@
 <nav
-  class="navbar navbar-dark bg-spotify-black navbar-expand-lg p-3 border-bottom border-white"
+  class="navbar navbar-expand-xs navbar-dark bg-spotify-black text-light border-bottom border-light"
 >
   <div class="container-fluid">
-    <a class="navbar-brand" href="#">SpotAI</a>
+    <a class="navbar-brand" href="index.html">SpotAI</a>
+    {% if session.get('token') %}
     <button
-      class="navbar-toggler"
+      class="navbar-toggler ms-auto border-0"
       type="button"
-      data-toggle="collapse"
-      data-target="#navbarNavAltMarkup"
+      data-bs-toggle="collapse"
+      data-bs-target="#navbarNavAltMarkup"
       aria-controls="navbarNavAltMarkup"
       aria-expanded="false"
       aria-label="Toggle navigation"
@@ -15,42 +16,21 @@
       <img
         src="{{ session['user_image'] if session['user_image'] else url_for('static', filename='img/DefaultProfileImage.svg') }}"
         alt="Profile Picture"
-        class="rounded-circle"
-        width="40"
-        height="40"
+        class="rounded-circle w-40"
+        width="40px"
+        height="40px"
       />
     </button>
-    <div class="collapse navbar-collapse" id="navbarNavDropdown">
-      {% if session.get('token') %}
-      <div class="nav-item dropdown">
-        <a
-          class="nav-link dropdown-toggle"
-          href="#"
-          id="navbarDropdownMenuLink"
-          role="button"
-          data-bs-toggle="dropdown"
-          aria-expanded="false"
-        >
-          <img
-            src="{{ session['user_image'] if session['user_image'] else url_for('static', filename='img/DefaultProfileImage.svg') }}"
-            alt="Profile Picture"
-            class="rounded-circle"
-            width="40"
-            height="40"
-          />
-        </a>
-        <ul class="dropdown-menu" aria-labelledby="navbarDropdownMenuLink">
-          <li><p>{{session['user_name']}}</p></li>
-          <li>
-            <a class="nav-item nav-link" href="{{ url_for('logout') }}"
-              >Logout</a
-            >
-          </li>
-        </ul>
+    <div class="collapse navbar-collapse" id="navbarNavAltMarkup">
+      <div class="navbar-nav">
+        <a class="nav-link ms-auto active" aria-current="page" href="#">Home</a>
+        <a class="nav-link ms-auto" href="#">Features</a>
+        <a class="nav-link ms-auto" href="#">Pricing</a>
+        <a class="nav-link ms-auto" href="{{ url_for('logout') }}">Logout</a>
       </div>
-      {% else %}
-      <a class="nav-item nav-link" href="{{ url_for('login') }}">Login</a>
-      {% endif %}
     </div>
+    {% else %}
+    <a class="nav-link" href="{{ url_for('login') }}">Login</a>
+    {% endif %}
   </div>
 </nav>

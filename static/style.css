@@ -35,6 +35,7 @@ body {
 .button {
   cursor: pointer;
   transition: all 0.3s ease; /* Smooth transition */
+  border: 0px;
 }
 
 .button:hover {
@@ -57,4 +58,8 @@ body {
 .navbar .dropdown-menu {
   right: 0;
   left: auto;
+}
+
+.large-text {
+  font-size: 150%;
 }

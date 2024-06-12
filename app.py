@@ -13,6 +13,8 @@ from tenacity import retry, wait_exponential, stop_after_attempt
 import spotipy
 from spotipy.oauth2 import SpotifyOAuth
 from flask_caching import Cache
+import concurrent.futures
+import time
 
 #OPTIMAL CLUSTERS: 4-5
 #FIGURING OUT OPTIMAL ITERATIONS
@@ -49,9 +51,13 @@ class SpotAI:
     def get_audio_features_for_tracks(self, track_ids):
         print("getting audio features")
         features = []
-        for i in range(0, len(track_ids), 100):
-            chunk = track_ids[i:i + 100]
-            features.extend(self.sp.audio_features(chunk))
+        # for i in range(0, len(track_ids), 100):
+        #     chunk = track_ids[i:i + 100]
+        #     features.extend(self.sp.audio_features(chunk))
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            futures = [executor.submit(self.sp.audio_features, track_ids[i:i + 100]) for i in range(0, len(track_ids), 100)]
+            for future in concurrent.futures.as_completed(futures):
+                features.extend(future.result())
         return features
     
     @cache.cached(timeout=3600, key_prefix='top_tracks')
@@ -100,12 +106,14 @@ class SpotAI:
 
 
     def create_playlist(self, playlist_name, num_clusters=5, num_iterations=10):
+        start_time = time.time()
         top_artists = self.sp.current_user_top_artists(limit=5, time_range='medium_term')['items']
 
         #getting all tracks form user's library (thinking of not using recent_songs not sure)
         liked_songs = self.get_all_saved_tracks()
         recent_songs = self.get_recent_tracks()
         top_songs = self.get_all_top_tracks()
+
 
         #appending all of these tracks to check if the user already knows them
         known_names = {item['track']['name'] for item in liked_songs}
@@ -122,6 +130,9 @@ class SpotAI:
             features = self.get_audio_features_for_tracks(track_ids)
         except spotipy.exceptions.SpotifyException as e:
             return jsonify({'error': str(e)}), 500
+        
+         # Filter out None values from features
+        features = [feature for feature in features if feature is not None]
 
         if not features:
             return jsonify({'error': "No audio features retrieved for the tracks"}), 500
@@ -212,6 +223,10 @@ class SpotAI:
 
         most_common_recommendations = [track_id for track_id, count in rec_counter.most_common(100)]
         self.sp.user_playlist_add_tracks(user=user_id, playlist_id=playlist_id, tracks=most_common_recommendations)
+
+        end_time = time.time()  # Record the end time
+        duration = end_time - start_time  # Calculate the duration
+        print(f"Playlist generation took {duration:.2f} seconds")  # Print the duration
 
         return render_template('playlist.html', playlist_name=playlist_name, playlist_url=f"https://open.spotify.com/playlist/{playlist_id}")
 
@@ -364,12 +379,12 @@ def callback():
     user_info = spot_ai.sp.current_user()
     session['user_name'] = user_info['display_name']
     session['user_image'] = user_info['images'][0]['url'] if user_info['images'] else None
-    print("Token", token)
+    #print("Token", token)
     return redirect(url_for('homepage'))
 
 @app.route('/homepage')
 def homepage():
-    print("session:", session)
+    #print("session:", session)
     return render_template('homepage.html')
 
 @app.route('/create_playlist', methods=['GET', 'POST'])

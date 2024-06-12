@@ -1,21 +1,21 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
+  <head>
+    <meta charset="UTF-8" />
     <title>Select a Playlist</title>
-</head>
-<body>
+  </head>
+  <body class="bg-dark text-light serif">
     <h1>Select a Playlist</h1>
     <form action="{{ url_for('create_playlist_from_playlist') }}" method="post">
-        <label for="playlist_id">Choose a playlist:</label>
-        <select name="playlist_id" id="playlist_id" required>
-            {% for playlist in playlists %}
-                <option value="{{ playlist.id }}">{{ playlist.name }}</option>
-            {% endfor %}
-        </select>
-        <label for="playlist_name">New Playlist Name:</label>
-        <input type="text" id="playlist_name" name="playlist_name" required>
-        <button type="submit">Create Playlist</button>
+      <label for="playlist_id">Choose a playlist:</label>
+      <select name="playlist_id" id="playlist_id" required>
+        {% for playlist in playlists %}
+        <option value="{{ playlist.id }}">{{ playlist.name }}</option>
+        {% endfor %}
+      </select>
+      <label for="playlist_name">New Playlist Name:</label>
+      <input type="text" id="playlist_name" name="playlist_name" required />
+      <button type="submit">Create Playlist</button>
     </form>
-</body>
+  </body>
 </html>
