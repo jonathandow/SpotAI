@@ -9,19 +9,28 @@ from sklearn.decomposition import PCA
 from sklearn.mixture import GaussianMixture
 import numpy as np
 from flask import Flask, redirect, request, session, url_for, render_template, jsonify
-from tenacity import retry, wait_exponential, stop_after_attempt
 import spotipy
 from spotipy.oauth2 import SpotifyOAuth
 from flask_caching import Cache
 import concurrent.futures
 import time
+import logging
+from logging.handlers import RotatingFileHandler
+
+handler = RotatingFileHandler('spotai.log', maxBytes=10000000, backupCount=1)
+handler.setLevel(logging.INFO)
+formatter = logging.Formatter(
+    '%(asctime)s %(levelname)s: %(message)s [in %(pathname)s:%(lineno)d]')
+handler.setFormatter(formatter)
+
 
 #OPTIMAL CLUSTERS: 4-5
 #FIGURING OUT OPTIMAL ITERATIONS
 app = Flask(__name__)
 app.secret_key = os.urandom(24)
 app.config['SESSION_COOKIE_NAME'] = 'SpotAI'
-
+app.logger.addHandler(handler)
+app.logger.setLevel(logging.INFO)
 file_path = "./info.txt"
 
 with open(file_path, 'r') as f:
@@ -39,6 +48,10 @@ class SpotAI:
                                                             redirect_uri=redirect_uri,
                                                             scope="user-library-read user-read-recently-played user-top-read playlist-modify-public"))
 
+    def clear_log_file(self, log_file):
+        with open(log_file, 'w'):
+            pass
+
     def get_token(self):
         token = session.get('token', None)
         if not token:
@@ -49,7 +62,7 @@ class SpotAI:
 
     @cache.cached(timeout=3600, key_prefix='audio_features')
     def get_audio_features_for_tracks(self, track_ids):
-        print("getting audio features")
+        app.logger.info("getting audio features")
         features = []
         # for i in range(0, len(track_ids), 100):
         #     chunk = track_ids[i:i + 100]
@@ -62,7 +75,7 @@ class SpotAI:
     
     @cache.cached(timeout=3600, key_prefix='top_tracks')
     def get_all_top_tracks(self):
-        print("getting top tracks")
+        app.logger.info("getting top tracks")
         top = []
         results = self.sp.current_user_top_tracks(limit=50, time_range='medium_term')
         top.extend(results['items'])
@@ -73,7 +86,7 @@ class SpotAI:
 
     @cache.cached(timeout=3600, key_prefix='playlist_tracks')
     def get_playlist_tracks(self, playlist_id):
-        print("getting playlist tracks")
+        app.logger.info("getting playlist tracks")
         tracks = []
         results = self.sp.playlist_tracks(playlist_id, limit=100)
         tracks.extend(results['items'])
@@ -84,7 +97,7 @@ class SpotAI:
 
     @cache.cached(timeout=3600, key_prefix='recent_tracks')
     def get_recent_tracks(self):
-        print("getting recent tracks")
+        app.logger.info("getting recent tracks")
         recents = []
         results = self.sp.current_user_recently_played(limit=50)
         recents.extend(results['items'])
@@ -95,7 +108,7 @@ class SpotAI:
 
     @cache.cached(timeout=3600, key_prefix='saved_tracks')
     def get_all_saved_tracks(self):
-        print("getting saved tracks")
+        app.logger.info("getting saved tracks")
         saved = []
         results = self.sp.current_user_saved_tracks(limit=50)
         saved.extend(results['items'])
@@ -106,6 +119,8 @@ class SpotAI:
 
 
     def create_playlist(self, playlist_name, num_clusters=5, num_iterations=10):
+        self.clear_log_file('spotai.log')
+        print("Creating Playlist......")
         start_time = time.time()
         top_artists = self.sp.current_user_top_artists(limit=5, time_range='medium_term')['items']
 
@@ -231,21 +246,26 @@ class SpotAI:
         return render_template('playlist.html', playlist_name=playlist_name, playlist_url=f"https://open.spotify.com/playlist/{playlist_id}")
 
     def create_playlist_from_playlist(self, selected_playlist_id, playlist_name, num_clusters=5, num_iterations=10):
+        start_time = time.time()
+        self.clear_log_file('spotai.log')
+        app.logger.info(f"Creating playlist from playlist_id: {selected_playlist_id}")
+        cache_key = f'playlist_tracks_{selected_playlist_id}'
+        cache.delete(cache_key)
         tracks = self.get_playlist_tracks(selected_playlist_id)
-
+        print(selected_playlist_id)
         for item in tracks:
             if item and 'track' in item and item['track']:
                 track_name = item['track'].get('name')
-                print(track_name)
+                app.logger.info(f"Track name: {track_name}")
             else:
-                print("Invalid track:", item)
+                app.logger.info("Invalid track: %s", item)
 
         track_ids = []
         for track in tracks:
             if track is not None and 'track' in track and track['track'] is not None:
                 track_ids.append(track['track']['id'])
             else:
-                print(f"Skipping Invalid track: {track}")
+                app.logger.info(f"Skipping Invalid track: {track}")
 
         if not track_ids:
             return jsonify({'error': "No valid tracks found in the playlist"}), 500
@@ -349,8 +369,9 @@ class SpotAI:
 
         most_common_recommendations = [track_id for track_id, count in rec_counter.most_common(100)]
         self.sp.user_playlist_add_tracks(user=user_id, playlist_id=playlist_id, tracks=most_common_recommendations)
-        cache.delete(f'playlist_tracks_{selected_playlist_id}')
-        print("Cache deleted")
+        end_time = time.time()  # Record the end time
+        duration = end_time - start_time  # Calculate the duration
+        print(f"Playlist generation took {duration:.2f} seconds")  # Print the duration
         return render_template('playlist.html', playlist_name=playlist_name, playlist_url=f"https://open.spotify.com/playlist/{playlist_id}")
 
 spot_ai = SpotAI(client_id=CLIENT_ID, client_secret=CLIENT_SECRET, redirect_uri="http://localhost:5000/callback")
@@ -405,10 +426,32 @@ def create_playlist_from_playlist():
     if request.method == 'POST':
         selected_playlist_id = request.form.get('playlist_id')
         playlist_name = request.form.get('playlist_name')
-        return spot_ai.create_playlist_from_playlist(selected_playlist_id, playlist_name)
+        app.logger.info(f"Selected Playlist ID: {selected_playlist_id}")
+        app.logger.info(f"Playlist Name: {playlist_name}")
+        session['selected_playlist_id'] = selected_playlist_id
+        session['playlist_name'] = playlist_name
+        
+        return redirect(url_for('playlist_creation'))
     else:
+        session.pop('selected_playlist_id', None)
+        session.pop('playlist_name', None)
         playlists = spot_ai.sp.current_user_playlists(limit=50)['items']
         return render_template('select_playlist.html', playlists=playlists)
+
+@app.route('/playlist_creation')
+def playlist_creation():
+    selected_playlist_id = session.get('selected_playlist_id')
+    playlist_name = session.get('playlist_name')
+
+    if not selected_playlist_id or not playlist_name:
+        return redirect(url_for('create_playlist_from_playlist'))
+    
+    response = spot_ai.create_playlist_from_playlist(selected_playlist_id, playlist_name)
+
+    session.pop('selected_playlist_id', None)
+    session.pop('playlist_name', None)
+
+    return response
 
 if __name__ == '__main__':
     app.run(port=5000, debug=True)

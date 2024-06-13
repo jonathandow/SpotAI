@@ -1,3 +1,6 @@
 info.txt
 Spotenv
 .cache
+requirement.txt
+SpotAI_key.pem
+spotai.log
