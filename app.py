@@ -378,6 +378,8 @@ spot_ai = SpotAI(client_id=CLIENT_ID, client_secret=CLIENT_SECRET, redirect_uri=
 
 @app.route('/')
 def index():
+    if session.get('token'):
+        return redirect(url_for('homepage'))
     return render_template('index.html')
 
 @app.route('/login')

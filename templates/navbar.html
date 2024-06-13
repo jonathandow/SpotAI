@@ -2,7 +2,7 @@
   class="navbar navbar-expand-xs navbar-dark bg-spotify-black text-light border-bottom border-light"
 >
   <div class="container-fluid">
-    <a class="navbar-brand" href="index.html">SpotAI</a>
+    <a class="navbar-brand" href={{ url_for('index') }}>SpotAI</a>
     {% if session.get('token') %}
     <button
       class="navbar-toggler ms-auto border-0"
