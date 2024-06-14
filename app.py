@@ -16,6 +16,9 @@ import concurrent.futures
 import time
 import logging
 from logging.handlers import RotatingFileHandler
+from flask_pymongo import PyMongo
+from pymongo.errors import ConnectionFailure
+from pymongo import MongoClient
 
 handler = RotatingFileHandler('spotai.log', maxBytes=10000000, backupCount=1)
 handler.setLevel(logging.INFO)
@@ -36,6 +39,27 @@ file_path = "./info.txt"
 with open(file_path, 'r') as f:
     CLIENT_ID = f.readline().strip()
     CLIENT_SECRET = f.readline().strip()
+    app.config["MONGO_URI"] = f.readline().strip()
+
+client = MongoClient(app.config["MONGO_URI"], 27017)
+db = client.SpotAI
+
+audio_features = db.audio_features
+top_tracks = db.top_tracks
+recent_tracks = db.recent_tracks
+saved_tracks = db.saved_tracks
+
+def ensure_mongo_connection():
+    try:
+        client.admin.command('ping')
+        app.logger.info("MongoDB Connection established.")
+    except ConnectionFailure:
+        app.logger.error("MongoDB Connection failed.")
+        raise
+
+@app.before_request
+def before_request():
+    ensure_mongo_connection()
 
 REDIRECT_URI = "http://localhost:5000/callback"
 
@@ -47,7 +71,6 @@ class SpotAI:
                                                             client_secret=client_secret,
                                                             redirect_uri=redirect_uri,
                                                             scope="user-library-read user-read-recently-played user-top-read playlist-modify-public"))
-
     def clear_log_file(self, log_file):
         with open(log_file, 'w'):
             pass
@@ -60,22 +83,64 @@ class SpotAI:
             token = self.sp.auth_manager.refresh_token(token['refresh_token'])
         return token
 
-    @cache.cached(timeout=3600, key_prefix='audio_features')
-    def get_audio_features_for_tracks(self, track_ids):
-        app.logger.info("getting audio features")
-        features = []
-        # for i in range(0, len(track_ids), 100):
-        #     chunk = track_ids[i:i + 100]
-        #     features.extend(self.sp.audio_features(chunk))
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            futures = [executor.submit(self.sp.audio_features, track_ids[i:i + 100]) for i in range(0, len(track_ids), 100)]
-            for future in concurrent.futures.as_completed(futures):
-                features.extend(future.result())
+    def save_user_data(self, collection_name, data_type, data):
+        db[collection_name].update_one(
+            {'_id': data_type},
+            {'$set': {data_type: data}},
+            upsert=True
+        )
+
+    def get_user_data(self, collection_name, data_type):
+        try:
+            collection_names = db.list_collection_names()
+            if collection_name not in collection_names:
+                db.create_collection(collection_name)
+                app.logger.info(f"Created collection '{collection_name}' in MongoDB.")
+            user_collection = db[collection_name]
+            user_data = user_collection.find_one({'_id': data_type})
+
+            return user_data[data_type] if user_data else None
+
+        except ConnectionFailure as e:
+            raise ConnectionError(f"MongoDB connection failed: {e}")
+
+        except Exception as ex:
+            raise ValueError(f"Error retrieving user data: {ex}")
+
+    def get_audio_features_for_tracks(self, user_id, track_ids):
+        app.logger.info("Getting audio features")
+        stored_features = self.get_user_data('audio_features', user_id)
+        if stored_features:
+            stored_track_ids = {feature['id'] for feature in stored_features}
+            track_ids_to_fetch = [track_id for track_id in track_ids if track_id not in stored_track_ids]
+        else:
+            stored_features = []
+            track_ids_to_fetch = track_ids
+        
+        features = stored_features
+        if track_ids_to_fetch:
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                futures = [executor.submit(self.sp.audio_features, track_ids[i:i + 100]) for i in range(0, len(track_ids), 100)]
+                for future in concurrent.futures.as_completed(futures):
+                    features.extend(future.result())
+            self.save_user_data('audio_features', user_id, features)
+        
         return features
     
-    @cache.cached(timeout=3600, key_prefix='top_tracks')
-    def get_all_top_tracks(self):
-        app.logger.info("getting top tracks")
+    def sync_user_data(self, user_id, collection_name, fetch_function):
+        current_data = fetch_function()
+        stored_data = self.get_user_data(collection_name, user_id)
+
+        if not stored_data or [track for track in current_data] != [track for track in stored_data]:
+            self.save_user_data(collection_name, user_id, current_data)
+            return current_data
+        return stored_data
+    
+    def get_all_top_tracks(self, user_id):
+        return self.sync_user_data(user_id, 'top_tracks', self.fetch_all_top_tracks)
+
+    def fetch_all_top_tracks(self):
+        app.logger.info("Fetching top tracks")
         top = []
         results = self.sp.current_user_top_tracks(limit=50, time_range='medium_term')
         top.extend(results['items'])
@@ -83,10 +148,12 @@ class SpotAI:
             results = self.sp.next(results)
             top.extend(results['items'])
         return top
-
-    @cache.cached(timeout=3600, key_prefix='playlist_tracks')
-    def get_playlist_tracks(self, playlist_id):
-        app.logger.info("getting playlist tracks")
+    
+    def get_playlist_tracks(self, user_id, playlist_id):
+        return self.sync_user_data(user_id, f'playlist_{playlist_id}_tracks', lambda: self.fetch_playlist_tracks(playlist_id))
+    
+    def fetch_playlist_tracks(self, playlist_id):
+        app.logger.info(f"Fetching playlist tracks for playlist ID: {playlist_id}")
         tracks = []
         results = self.sp.playlist_tracks(playlist_id, limit=100)
         tracks.extend(results['items'])
@@ -94,10 +161,12 @@ class SpotAI:
             results = self.sp.next(results)
             tracks.extend(results['items'])
         return tracks
+    
+    def get_recent_tracks(self, user_id):
+        return self.sync_user_data(user_id, 'recent_tracks', self.fetch_recent_tracks)
 
-    @cache.cached(timeout=3600, key_prefix='recent_tracks')
-    def get_recent_tracks(self):
-        app.logger.info("getting recent tracks")
+    def fetch_recent_tracks(self):
+        app.logger.info("Fetching recent tracks")
         recents = []
         results = self.sp.current_user_recently_played(limit=50)
         recents.extend(results['items'])
@@ -105,10 +174,12 @@ class SpotAI:
             results = self.sp.next(results)
             recents.extend(results['items'])
         return recents
-
-    @cache.cached(timeout=3600, key_prefix='saved_tracks')
-    def get_all_saved_tracks(self):
-        app.logger.info("getting saved tracks")
+    
+    def get_all_saved_tracks(self, user_id):
+        return self.sync_user_data(user_id, 'saved_tracks', self.fetch_all_saved_tracks)
+    
+    def fetch_all_saved_tracks(self):
+        app.logger.info("Fetching saved tracks")
         saved = []
         results = self.sp.current_user_saved_tracks(limit=50)
         saved.extend(results['items'])
@@ -117,17 +188,16 @@ class SpotAI:
             saved.extend(results['items'])
         return saved
 
-
-    def create_playlist(self, playlist_name, num_clusters=5, num_iterations=10):
+    def create_playlist(self, user_id, playlist_name, num_clusters=5, num_iterations=10):
         self.clear_log_file('spotai.log')
         print("Creating Playlist......")
         start_time = time.time()
         top_artists = self.sp.current_user_top_artists(limit=5, time_range='medium_term')['items']
 
         #getting all tracks form user's library (thinking of not using recent_songs not sure)
-        liked_songs = self.get_all_saved_tracks()
-        recent_songs = self.get_recent_tracks()
-        top_songs = self.get_all_top_tracks()
+        liked_songs = self.get_all_saved_tracks(user_id)
+        recent_songs = self.get_recent_tracks(user_id)
+        top_songs = self.get_all_top_tracks(user_id)
 
 
         #appending all of these tracks to check if the user already knows them
@@ -139,10 +209,10 @@ class SpotAI:
         known_tracks.update({item['track']['id'] for item in recent_songs})
         known_tracks.update({item['id'] for item in top_songs})
 
-        track_ids = [track['id'] for track in top_songs[:200]]
+        track_ids = [track['id'] for track in top_songs]
         #getting audio features for the tracks
         try:
-            features = self.get_audio_features_for_tracks(track_ids)
+            features = self.get_audio_features_for_tracks(user_id, track_ids)
         except spotipy.exceptions.SpotifyException as e:
             return jsonify({'error': str(e)}), 500
         
@@ -193,23 +263,25 @@ class SpotAI:
 
         combined_centroids = (weighted_kmeans_centroids + weighted_gmm_centroids) / 2
 
-        # OLD IMPLEMENTATION (TESTING)
-        # kmeans = KMeans(n_clusters=num_clusters, random_state=42)
-        # kmeans.fit(X)
-        # features_df['cluster'] = kmeans.labels_
-        # centroids = kmeans.cluster_centers_
         print("Recommendations...")
         #getting the recommendations
         recommendations = []
         for i in range(num_clusters):
             centroid = combined_centroids[i]
             cluster_tracks = features_df[features_df['cluster'] == i]
-            cluster_tracks_pca = X_pca[features_df['cluster'] == i]
-            centroid_array = np.array(centroid)
-
-            closest_index = np.argmin(np.sum((cluster_tracks_pca - centroid_array) ** 2, axis=1))
-            closest_id = track_ids[cluster_tracks.index[closest_index]]
-            recommendations.append(closest_id)
+            
+            if len(cluster_tracks) > 0:
+                cluster_indices = cluster_tracks.index.tolist()
+                cluster_distances = np.sum((X_pca[cluster_indices] - centroid) ** 2, axis=1)
+                closest_index = cluster_indices[np.argmin(cluster_distances)]
+                
+                if closest_index < len(track_ids):
+                    closest_id = track_ids[closest_index]
+                    recommendations.append(closest_id)
+                else:
+                    app.logger.warning(f"Closest index {closest_index} out of range for track_ids. Skipping recommendation.")
+            else:
+                app.logger.warning(f"No tracks found in cluster {i}. Skipping recommendation.")
 
         user_id = self.sp.me()['id']
         playlist_description = f"SpotAI Recommendations. Updated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}."
@@ -245,14 +317,14 @@ class SpotAI:
 
         return render_template('playlist.html', playlist_name=playlist_name, playlist_url=f"https://open.spotify.com/playlist/{playlist_id}")
 
-    def create_playlist_from_playlist(self, selected_playlist_id, playlist_name, num_clusters=5, num_iterations=10):
+    def create_playlist_from_playlist(self, user_id, selected_playlist_id, playlist_name, num_clusters=5, num_iterations=10):
         start_time = time.time()
         self.clear_log_file('spotai.log')
         app.logger.info(f"Creating playlist from playlist_id: {selected_playlist_id}")
         cache_key = f'playlist_tracks_{selected_playlist_id}'
         cache.delete(cache_key)
-        tracks = self.get_playlist_tracks(selected_playlist_id)
-        print(selected_playlist_id)
+        tracks = self.get_playlist_tracks(user_id, selected_playlist_id)
+        # print(selected_playlist_id)
         for item in tracks:
             if item and 'track' in item and item['track']:
                 track_name = item['track'].get('name')
@@ -270,9 +342,9 @@ class SpotAI:
         if not track_ids:
             return jsonify({'error': "No valid tracks found in the playlist"}), 500
 
-        liked_songs = self.get_all_saved_tracks()
-        recent_songs = self.get_recent_tracks()
-        top_songs = self.get_all_top_tracks()
+        liked_songs = self.get_all_saved_tracks(user_id)
+        recent_songs = self.get_recent_tracks(user_id)
+        top_songs = self.get_all_top_tracks(user_id)
 
         known_names = {item['track']['name'] for item in liked_songs}
         known_names.update({item['track']['name'] for item in recent_songs[:100]})
@@ -285,7 +357,7 @@ class SpotAI:
         # track_ids = [track['track']['id'] for track in tracks]
 
         try:
-            features = self.get_audio_features_for_tracks(track_ids)
+            features = self.get_audio_features_for_tracks(user_id, track_ids)
         except spotipy.exceptions.SpotifyException as e:
             return jsonify({'error': str(e)}), 500
         
@@ -333,15 +405,30 @@ class SpotAI:
         # centroids = kmeans.cluster_centers_
 
         recommendations = []
+        # for i in range(num_clusters):
+        #     centroid = combined_centroids[i]
+        #     cluster_tracks = features_df[features_df['cluster'] == i]
+        #     cluster_tracks_pca = X_pca[features_df['cluster'] == i]
+        #     centroid_array = np.array(centroid)
+        #     closest_index = np.argmin(np.sum((cluster_tracks_pca - centroid_array) ** 2, axis=1))
+        #     closest_id = track_ids[cluster_tracks.index[closest_index]]
+        #     recommendations.append(closest_id)
         for i in range(num_clusters):
             centroid = combined_centroids[i]
             cluster_tracks = features_df[features_df['cluster'] == i]
-            cluster_tracks_pca = X_pca[features_df['cluster'] == i]
-            centroid_array = np.array(centroid)
-
-            closest_index = np.argmin(np.sum((cluster_tracks_pca - centroid_array) ** 2, axis=1))
-            closest_id = track_ids[cluster_tracks.index[closest_index]]
-            recommendations.append(closest_id)
+            
+            if len(cluster_tracks) > 0:
+                cluster_indices = cluster_tracks.index.tolist()
+                cluster_distances = np.sum((X_pca[cluster_indices] - centroid) ** 2, axis=1)
+                closest_index = cluster_indices[np.argmin(cluster_distances)]
+                
+                if closest_index < len(track_ids):
+                    closest_id = track_ids[closest_index]
+                    recommendations.append(closest_id)
+                else:
+                    app.logger.warning(f"Closest index {closest_index} out of range for track_ids. Skipping recommendation.")
+            else:
+                app.logger.warning(f"No tracks found in cluster {i}. Skipping recommendation.")
         user_id = self.sp.me()['id']
         playlist_description = f"SpotAI Recommendations. Based on {self.sp.playlist(selected_playlist_id)['name']}. Updated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}."
         playlists = self.sp.user_playlists(user_id)['items']
@@ -360,7 +447,7 @@ class SpotAI:
         for x in range(num_iterations):
             random_tracks = random.sample(recommendations, min(5, len(recommendations)))
             try:
-                recommended_tracks = self.sp.recommendations(seed_tracks=random_tracks[:5], limit=100)
+                recommended_tracks = self.sp.recommendations(seed_tracks=random_tracks, limit=100)
             except spotipy.exceptions.SpotifyException as e:
                 return jsonify({'error': str(e)}), 500
 
@@ -412,12 +499,13 @@ def homepage():
 
 @app.route('/create_playlist', methods=['GET', 'POST'])
 def create_playlist():
+    user_id = spot_ai.sp.me()['id']
     token = spot_ai.get_token()
     if not token:
         return redirect(url_for('login'))
     if request.method == 'POST':
         playlist_name = request.form.get('playlist_name')
-        return spot_ai.create_playlist(playlist_name)
+        return spot_ai.create_playlist(user_id, playlist_name)
     return render_template('create_playlist.html')
 
 @app.route('/create_playlist_from_playlist', methods=['GET', 'POST'])
@@ -442,13 +530,14 @@ def create_playlist_from_playlist():
 
 @app.route('/playlist_creation')
 def playlist_creation():
+    user_id = spot_ai.sp.me()['id']
     selected_playlist_id = session.get('selected_playlist_id')
     playlist_name = session.get('playlist_name')
 
     if not selected_playlist_id or not playlist_name:
         return redirect(url_for('create_playlist_from_playlist'))
     
-    response = spot_ai.create_playlist_from_playlist(selected_playlist_id, playlist_name)
+    response = spot_ai.create_playlist_from_playlist(user_id, selected_playlist_id, playlist_name)
 
     session.pop('selected_playlist_id', None)
     session.pop('playlist_name', None)
