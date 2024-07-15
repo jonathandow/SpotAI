@@ -19,6 +19,8 @@ from logging.handlers import RotatingFileHandler
 from flask_pymongo import PyMongo
 from pymongo.errors import ConnectionFailure
 from pymongo import MongoClient
+import certifi
+import sys
 
 handler = RotatingFileHandler('spotai.log', maxBytes=10000000, backupCount=1)
 handler.setLevel(logging.INFO)
@@ -41,7 +43,7 @@ with open(file_path, 'r') as f:
     CLIENT_SECRET = f.readline().strip()
     app.config["MONGO_URI"] = f.readline().strip()
 
-client = MongoClient(app.config["MONGO_URI"], 27017)
+client = MongoClient(app.config["MONGO_URI"], tlsCAFile=certifi.where())
 db = client.SpotAI
 
 audio_features = db.audio_features
@@ -61,7 +63,7 @@ def ensure_mongo_connection():
 def before_request():
     ensure_mongo_connection()
 
-REDIRECT_URI = "http://localhost:5000/callback"
+REDIRECT_URI = "http://localhost:3000/callback"
 
 cache = Cache(app, config={'CACHE_TYPE': 'SimpleCache', 'CACHE_DEFAULT_TIMEOUT': 3600})
 
@@ -137,6 +139,8 @@ class SpotAI:
         return stored_data
     
     def get_all_top_tracks(self, user_id):
+        print(self.fetch_all_saved_tracks)
+        print("SIZE: ", sys.getsizeof(self.fetch_all_saved_tracks))
         return self.sync_user_data(user_id, 'top_tracks', self.fetch_all_top_tracks)
 
     def fetch_all_top_tracks(self):
@@ -461,7 +465,7 @@ class SpotAI:
         print(f"Playlist generation took {duration:.2f} seconds")  # Print the duration
         return render_template('playlist.html', playlist_name=playlist_name, playlist_url=f"https://open.spotify.com/playlist/{playlist_id}")
 
-spot_ai = SpotAI(client_id=CLIENT_ID, client_secret=CLIENT_SECRET, redirect_uri="http://localhost:5000/callback")
+spot_ai = SpotAI(client_id=CLIENT_ID, client_secret=CLIENT_SECRET, redirect_uri="http://localhost:3000/callback")
 
 @app.route('/')
 def index():
@@ -545,4 +549,4 @@ def playlist_creation():
     return response
 
 if __name__ == '__main__':
-    app.run(port=5000, debug=True)
+    app.run(port=3000, debug=True)
