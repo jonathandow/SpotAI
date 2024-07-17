@@ -38,19 +38,67 @@
     {% include 'navbar.html' %}
     <div class="container serif my-5 large-text">
       <h1 class="my-5">Create Playlist</h1>
-      <form method="POST">
-        <div class="form-group my-3">
-          <label for="playlist_name">Playlist Name:</label><br />
-          <input type="text" id="playlist_name" name="playlist_name" required />
-        </div>
-        <button
-          class="px-3 py-2 button rounded-pill bg-green btn-sm text-light"
-          type="submit"
-          value="Create Playlist"
-        >
-          Create Playlist
-        </button>
-      </form>
+      <div id="form-container">
+        <form id="playlist-form">
+          <div class="form-group my-3">
+            <label for="playlist_name">Playlist Name:</label><br />
+            <input
+              type="text"
+              id="playlist_name"
+              name="playlist_name"
+              required
+            />
+          </div>
+          <button
+            class="px-3 py-2 button rounded-pill bg-green btn-sm text-light"
+            type="submit"
+          >
+            Create Playlist
+          </button>
+        </form>
+      </div>
+      <div id="status-container" class="my-5" style="display: none">
+        <h3>Generating Playlist...</h3>
+        <div id="status"></div>
+      </div>
     </div>
+
+    <!-- jQuery -->
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <!-- Socket.IO -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/3.1.3/socket.io.min.js"></script>
+    <script>
+      $(document).ready(function () {
+        var socket = io();
+
+        $('#playlist-form').on('submit', function (e) {
+          e.preventDefault();
+
+          var playlistName = $('#playlist_name').val();
+          $.ajax({
+            type: 'POST',
+            url: '/create_playlist',
+            data: { playlist_name: playlistName },
+            success: function () {
+              $('#form-container').hide();
+              $('#status-container').show();
+            },
+            error: function (xhr, status, error) {
+              alert('An error occurred: ' + error);
+            },
+          });
+
+          socket.on('status_update', function (data) {
+            var statusDiv = $('#status');
+            var newStatus = $('<p></p>').text(data.status);
+            statusDiv.append(newStatus);
+          });
+
+          socket.on('redirect', function (data) {
+            window.location.href = data.url;
+          });
+        });
+      });
+    </script>
   </body>
 </html>

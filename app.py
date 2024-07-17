@@ -12,6 +12,7 @@ from flask import Flask, redirect, request, session, url_for, render_template, j
 import spotipy
 from spotipy.oauth2 import SpotifyOAuth
 from flask_caching import Cache
+from flask_socketio import SocketIO, emit
 import concurrent.futures
 import time
 import logging
@@ -31,6 +32,7 @@ app.secret_key = os.urandom(24)
 app.config['SESSION_COOKIE_NAME'] = 'SpotAI'
 app.logger.addHandler(handler)
 app.logger.setLevel(logging.INFO)
+socketio = SocketIO(app, cors_allowed_origins="*")
 file_path = "./info.txt"
 
 with open(file_path, 'r') as f:
@@ -256,12 +258,21 @@ class SpotAI:
     def create_playlist_DBSCAN(self, user_id, playlist_name, num_clusters=5, num_iterations=10):
         self.clear_log_file('spotai.log')
         print("Creating Playlist......")
+        socketio.emit('status_update', {'status': 'Creating Playlist...'})
         start_time = time.time()
         
+        socketio.emit('status_update', {'status': 'Gathering top artists'})
         top_artists = self.sp.current_user_top_artists(limit=5, time_range='medium_term')['items']
+        socketio.emit('status_update', {'status': 'Top artists found'})
+        socketio.emit('status_update', {'status': 'Gathering liked songs'})
         liked_songs = self.get_all_saved_tracks()
+        socketio.emit('status_update', {'status': 'Liked songs found'})
+        socketio.emit('status_update', {'status': 'Gathering recent songs'})
         recent_songs = self.get_recent_tracks()
+        socketio.emit('status_update', {'status': 'Recent songs found'})
+        socketio.emit('status_update', {'status': 'Gathering top songs'})
         top_songs = self.get_all_top_tracks()
+        socketio.emit('status_update', {'status': 'Top songs found'})
         
         known_names = {item['track']['name'] for item in liked_songs}
         known_names.update({item['track']['name'] for item in recent_songs})
@@ -273,7 +284,9 @@ class SpotAI:
         
         track_ids = [track['id'] for track in top_songs]
         try:
+            socketio.emit('status_update', {'status': 'Gathering audio features'})
             features = self.get_audio_features_for_tracks(track_ids)
+            socketio.emit('status_update', {'status': 'Audio features found'})
         except spotipy.exceptions.SpotifyException as e:
             return jsonify({'error': str(e)}), 500
         
@@ -288,9 +301,11 @@ class SpotAI:
         feature_columns = ['danceability', 'energy', 'key', 'loudness', 'mode', 'speechiness', 'acousticness', 'instrumentalness', 'liveness', 'valence', 'tempo', 'play count']
         X = features_df[feature_columns]
         
+        socketio.emit('status_update', {'status': 'Fitting model'})
         scaler = StandardScaler()
         X_scaled = scaler.fit_transform(X)
         
+        socketio.emit('status_update', {'status': 'Finding clusters'})
         dbscan = DBSCAN(eps=0.5, min_samples=5)
         dbscan.fit(X_scaled)
         features_df['cluster'] = dbscan.labels_
@@ -298,6 +313,7 @@ class SpotAI:
         # Filter out noise points
         clusters = features_df[features_df['cluster'] != -1].groupby('cluster')
         
+        socketio.emit('status_update', {'status': 'Creating recommendations'})
         recommendations = []
         for cluster_id, cluster_tracks in clusters:
             if cluster_tracks.shape[0] > 0:
@@ -318,6 +334,7 @@ class SpotAI:
         playlist_description = f"SpotAI Recommendations. Updated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}."
         playlists = self.sp.user_playlists(user_id)['items']
         playlist_id = None
+        socketio.emit('status_update', {'status': 'Building playlist'})
         for playlist in playlists:
             if playlist['name'] == playlist_name:
                 playlist_id = playlist['id']
@@ -345,8 +362,10 @@ class SpotAI:
         end_time = time.time()
         duration = end_time - start_time
         print(f"Playlist generation took {duration:.2f} seconds")
+        socketio.emit('status_update', {'status': 'Playlist created'})
         
-        return render_template('playlist.html', playlist_name=playlist_name, playlist_url=f"https://open.spotify.com/playlist/{playlist_id}")
+        socketio.emit('redirect', {'url': f"https://open.spotify.com/playlist/{playlist_id}"})
+        #return render_template('playlist.html', playlist_name=playlist_name, playlist_url=f"https://open.spotify.com/playlist/{playlist_id}")
 
     def create_playlist_from_playlist(self, selected_playlist_id, playlist_name, num_clusters=5, num_iterations=10):
         start_time = time.time()
@@ -522,7 +541,9 @@ def create_playlist():
         playlist_name = request.form.get('playlist_name')
         #return spot_ai.create_playlist(playlist_name)
         user_id=spot_ai.get_user_id()
-        return spot_ai.create_playlist_DBSCAN(user_id, playlist_name)
+        socketio.start_background_task(target=spot_ai.create_playlist_DBSCAN, user_id=user_id, playlist_name=playlist_name)
+        return '', 204
+        #return spot_ai.create_playlist_DBSCAN(user_id, playlist_name)
     return render_template('create_playlist.html')
 
 @app.route('/create_playlist_from_playlist', methods=['GET', 'POST'])
@@ -561,4 +582,4 @@ def playlist_creation():
     return response
 
 if __name__ == '__main__':
-    app.run(port=3000, debug=True)
+    socketio.run(app, port=3000, debug=True)
