@@ -1,0 +1,844 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SpotAI - AI-Powered Music Discovery</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --spotify-green: #1DB954;
+            --spotify-green-hover: #1ed760;
+            --dark-bg: #121212;
+            --card-bg: #181818;
+            --card-hover: #282828;
+            --text-primary: #ffffff;
+            --text-secondary: #b3b3b3;
+            --text-tertiary: #6a6a6a;
+        }
+        
+        body {
+            font-family: 'Montserrat', sans-serif;
+            background: var(--dark-bg);
+            color: var(--text-primary);
+            min-height: 100vh;
+        }
+        
+        .spotify-green {
+            color: var(--spotify-green);
+        }
+        
+        .spotify-green-bg {
+            background-color: var(--spotify-green);
+        }
+        
+        .track-card {
+            background: var(--card-bg);
+            border-radius: 8px;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .track-card:hover {
+            background: var(--card-hover);
+            transform: translateY(-4px);
+            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.3);
+        }
+        
+        .track-card.selected {
+            border: 2px solid var(--spotify-green);
+        }
+        
+        .track-card .play-icon {
+            position: absolute;
+            right: 16px;
+            bottom: 16px;
+            background: var(--spotify-green);
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 0;
+            transform: translateY(10px);
+            transition: all 0.3s ease;
+        }
+        
+        .track-card:hover .play-icon {
+            opacity: 1;
+            transform: translateY(0);
+        }
+        
+        .method-card {
+            background: var(--card-bg);
+            border-radius: 12px;
+            transition: all 0.3s ease;
+            border: 2px solid transparent;
+            overflow: hidden;
+        }
+        
+        .method-card:hover, .method-card.selected {
+            border-color: var(--spotify-green);
+            transform: translateY(-5px);
+            box-shadow: 0 15px 30px rgba(0, 0, 0, 0.3);
+        }
+        
+        .btn-spotify {
+            background-color: var(--spotify-green);
+            color: white;
+            font-weight: 600;
+            border-radius: 30px;
+            padding: 12px 30px;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        
+        .btn-spotify:hover {
+            background-color: var(--spotify-green-hover);
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.2);
+        }
+        
+        .btn-spotify:active {
+            transform: translateY(0);
+        }
+        
+        .loading {
+            animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: .5; }
+        }
+        
+        .navbar {
+            backdrop-filter: blur(10px);
+            background-color: rgba(0, 0, 0, 0.6);
+        }
+        
+        .progress-steps {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 30px;
+            position: relative;
+        }
+        
+        .progress-steps::before {
+            content: '';
+            position: absolute;
+            top: 15px;
+            left: 0;
+            width: 100%;
+            height: 2px;
+            background: var(--text-tertiary);
+            z-index: 0;
+        }
+        
+        .step {
+            position: relative;
+            z-index: 1;
+            background: var(--dark-bg);
+            padding: 0 10px;
+        }
+        
+        .step.active .step-number {
+            background: var(--spotify-green);
+            color: white;
+        }
+        
+        .step-number {
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            background: var(--card-bg);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 10px;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body class="text-white min-h-screen">
+    <!-- Navigation Bar -->
+    <nav class="navbar fixed w-full top-0 z-50 py-4 px-6">
+        <div class="container mx-auto flex justify-between items-center">
+            <div class="flex items-center">
+                <i class="fas fa-headphones-alt text-2xl spotify-green mr-3"></i>
+                <h1 class="text-2xl font-bold">Spot<span class="spotify-green">AI</span></h1>
+            </div>
+            <div class="hidden md:flex items-center space-x-6">
+                <a href="/" class="hover:text-white text-gray-300 font-medium">Home</a>
+                <a href="#" class="text-white font-medium border-b-2 border-green-500">Dashboard</a>
+                <a href="/logout" class="text-gray-300 hover:text-white font-medium">Logout</a>
+            </div>
+            <button class="md:hidden text-white text-xl">
+                <i class="fas fa-bars"></i>
+            </button>
+        </div>
+    </nav>
+
+    <div class="container mx-auto px-4 py-8 max-w-6xl mt-20">
+        <!-- Header Section -->
+        <header class="mb-12 text-center">
+            <h1 class="text-5xl font-extrabold mb-4">AI-Powered <span class="spotify-green">Music Discovery</span></h1>
+            <p class="text-gray-300 text-xl max-w-2xl mx-auto">Create personalized playlists tailored to your unique music taste using artificial intelligence</p>
+        </header>
+
+        <!-- Progress Steps -->
+        <div class="progress-steps max-w-3xl mx-auto mb-12">
+            <div class="step active text-center">
+                <div class="step-number">1</div>
+                <div class="text-sm font-semibold">Choose Method</div>
+            </div>
+            <div class="step text-center">
+                <div class="step-number">2</div>
+                <div class="text-sm font-semibold">Select Tracks</div>
+            </div>
+            <div class="step text-center">
+                <div class="step-number">3</div>
+                <div class="text-sm font-semibold">Get Recommendations</div>
+            </div>
+            <div class="step text-center">
+                <div class="step-number">4</div>
+                <div class="text-sm font-semibold">Create Playlist</div>
+            </div>
+        </div>
+
+        <!-- Playlist Creation Methods -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-8 mb-12">
+            <div class="method-card cursor-pointer transform hover:scale-105 transition-all duration-300" onclick="selectMethod('playlist')">
+                <div class="bg-green-900 bg-opacity-20 p-3 text-center">
+                    <i class="fas fa-list text-3xl spotify-green"></i>
+                </div>
+                <div class="p-6">
+                    <h3 class="text-xl font-bold mb-3 spotify-green">From Your Playlists</h3>
+                    <p class="text-gray-400 text-sm">Generate recommendations based on tracks from your existing playlists</p>
+                </div>
+            </div>
+            <div class="method-card cursor-pointer transform hover:scale-105 transition-all duration-300" onclick="selectMethod('top')">
+                <div class="bg-green-900 bg-opacity-20 p-3 text-center">
+                    <i class="fas fa-crown text-3xl spotify-green"></i>
+                </div>
+                <div class="p-6">
+                    <h3 class="text-xl font-bold mb-3 spotify-green">From Top Songs</h3>
+                    <p class="text-gray-400 text-sm">Create a playlist based on your most played tracks</p>
+                </div>
+            </div>
+            <div class="method-card cursor-pointer transform hover:scale-105 transition-all duration-300" onclick="selectMethod('recent')">
+                <div class="bg-green-900 bg-opacity-20 p-3 text-center">
+                    <i class="fas fa-history text-3xl spotify-green"></i>
+                </div>
+                <div class="p-6">
+                    <h3 class="text-xl font-bold mb-3 spotify-green">From Recent History</h3>
+                    <p class="text-gray-400 text-sm">Use your recent listening history to find new music</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Playlist Selector -->
+        <div id="playlistSelect" class="hidden mb-8 bg-card-bg p-6 rounded-xl shadow-lg">
+            <h3 class="text-xl font-bold mb-4 flex items-center">
+                <i class="fas fa-music mr-2 spotify-green"></i> Select a Playlist
+            </h3>
+            <select id="userPlaylists" class="w-full bg-[#282828] text-white p-4 rounded-xl border-2 border-gray-700 focus:border-green-400 focus:ring-4 focus:ring-green-400 focus:outline-none shadow-md transition-all duration-200 ease-in-out hover:border-green-500 hover:bg-[#232323] cursor-pointer custom-dropdown">
+    <option value="">Loading playlists...</option>
+</select>
+<style>
+/* Custom dropdown styles for better aesthetics */
+.custom-dropdown {
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url('data:image/svg+xml;utf8,<svg fill="white" height="24" viewBox="0 0 24 24" width="24" xmlns="http://www.w3.org/2000/svg"><path d="M7 10l5 5 5-5z"/></svg>');
+    background-repeat: no-repeat;
+    background-position: right 1rem center;
+    background-size: 1.5em;
+    padding-right: 3em;
+    background-color: #1DB954 !important;
+    color: #fff !important;
+}
+.custom-dropdown option {
+    background: #232323;
+    color: #fff;
+    font-size: 1rem;
+    padding: 0.5em 1em;
+}
+</style>
+        </div>
+
+        <!-- Main Content -->
+        <div id="mainContent" class="hidden">
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                <!-- Selected Tracks Section -->
+                <section class="bg-card-bg rounded-xl p-6 shadow-lg">
+                    <div class="flex justify-between items-center mb-6">
+                        <h2 class="text-2xl font-bold flex items-center">
+                            <i class="fas fa-music mr-2 spotify-green"></i>
+                        </h2>
+                        <button onclick="getRecommendations()" class="btn-spotify flex items-center">
+                            <i class="fas fa-magic mr-2"></i> Get Recommendations
+                        </button>
+                    </div>
+                    <div class="space-y-4" id="topTracks"></div>
+                </section>
+
+                <!-- Recommendations Section -->
+                <section class="bg-card-bg rounded-xl p-6 shadow-lg">
+                    <h2 class="text-2xl font-bold mb-6 flex items-center">
+                        <i class="fas fa-brain mr-2 spotify-green"></i> AI Recommendations
+                    </h2>
+                    <p id="aiExplanation" class="text-gray-300 mb-4"></p>
+                    <div id="recommendationsContainer" class="hidden space-y-4">
+                        <div id="recommendations" class="space-y-4"></div>
+                        <button onclick="createPlaylist()" class="w-full mt-8 btn-spotify flex items-center justify-center py-4">
+                            <i class="fas fa-plus-circle mr-2"></i> Create Playlist
+                        </button>
+                    </div>
+                    <div id="recommendationsPlaceholder" class="text-center py-16">
+                        <i class="fas fa-music text-5xl text-gray-600 mb-4"></i>
+                        <p class="text-gray-400">Select tracks to get AI-powered recommendations</p>
+                    </div>
+                </section>
+            </div>
+        </div>
+
+        <!-- Success Message -->
+        <div id="successMessage" class="fixed inset-0 flex items-center justify-center z-50 hidden">
+            <div class="absolute inset-0 bg-black bg-opacity-70"></div>
+            <div class="bg-card-bg rounded-xl p-8 shadow-2xl relative z-10 max-w-md w-full text-center">
+                <div class="text-6xl text-green-500 mb-4">
+                    <i class="fas fa-check-circle"></i>
+                </div>
+                <h3 class="text-2xl font-bold mb-2">Playlist Created!</h3>
+                <p class="text-gray-300 mb-6">Your new playlist has been successfully added to your Spotify library.</p>
+                <button onclick="document.getElementById('successMessage').classList.add('hidden')" class="btn-spotify w-full">
+                    Done
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let selectedTracks = new Set();
+        let recommendedTracks = [];
+        let tracksData = {};
+        let currentMethod = null;
+        let currentStep = 1;
+
+        // Update progress steps UI
+        function updateProgressSteps(step) {
+            currentStep = step;
+            document.querySelectorAll('.step').forEach((stepEl, index) => {
+                if (index + 1 <= step) {
+                    stepEl.classList.add('active');
+                } else {
+                    stepEl.classList.remove('active');
+                }
+            });
+        }
+
+        function selectMethod(method) {
+            console.log('selectMethod:', method);
+            // Clear previous selections
+            selectedTracks.clear();
+            tracksData = {};
+            document.getElementById('recommendations').innerHTML = '';
+            document.getElementById('aiExplanation').textContent = '';
+            // Reset recommendation view
+            document.getElementById('recommendationsPlaceholder').classList.remove('hidden');
+            document.getElementById('recommendationsContainer').classList.add('hidden');
+            currentMethod = method;
+
+            // Update UI for selected method
+            document.querySelectorAll('.method-card').forEach(card => {
+                card.classList.remove('selected');
+            });
+            document.querySelector(`[onclick="selectMethod('${method}')"]`).classList.add('selected');
+
+            // Toggle playlist selector vs main content
+            const playlistSelectEl = document.getElementById('playlistSelect');
+            const mainContentEl = document.getElementById('mainContent');
+            if (method === 'playlist') {
+                playlistSelectEl.classList.remove('hidden');
+                mainContentEl.classList.add('hidden');
+            } else {
+                playlistSelectEl.classList.add('hidden');
+                mainContentEl.classList.remove('hidden');
+            }
+
+            // Update progress steps
+            updateProgressSteps(method === 'playlist' ? 1 : 2);
+
+            // For top tracks and recent history, get recommendations immediately
+            if (method === 'playlist') {
+                loadPlaylists();
+            } else if (method === 'top') {
+                // Skip track selection and go straight to recommendations
+                getRecommendationsForMethod('top');
+            } else if (method === 'recent') {
+                // Skip track selection and go straight to recommendations
+                getRecommendationsForMethod('recent');
+            }
+        }
+
+        async function loadPlaylists() {
+            try {
+                // Show loading state
+                const select = document.getElementById('userPlaylists');
+                select.innerHTML = '<option value="">Loading playlists...</option>';
+                select.disabled = true;
+
+                const response = await fetch('/api/playlists');
+                const playlists = await response.json();
+                
+                if (playlists.length === 0) {
+                    select.innerHTML = '<option value="">No playlists found</option>';
+                    return;
+                }
+                
+                select.innerHTML = '<option value="">Select a playlist</option>' +
+                    playlists.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
+                select.disabled = false;
+                
+                // When a playlist is selected, get recommendations directly
+                select.onchange = async () => {
+                    if (select.value) {
+                        // Update progress steps
+                        updateProgressSteps(2);
+                        
+                        // Get recommendations using the entire playlist
+                        getRecommendationsForPlaylist(select.value);
+                    }
+                };
+            } catch (error) {
+                console.error('Error loading playlists:', error);
+                document.getElementById('userPlaylists').innerHTML = 
+                    '<option value="">Error loading playlists</option>';
+            }
+        }
+        
+        async function getRecommendationsForPlaylist(playlistId) {
+            try {
+                // Show main content and loading state
+                document.getElementById('mainContent').style.display = 'block';
+                document.getElementById('recommendationsPlaceholder').style.display = 'none';
+                document.getElementById('recommendationsContainer').style.display = 'block';
+                document.getElementById('recommendations').innerHTML = `
+                    <div class="loading p-10 text-center">
+                        <i class="fas fa-spinner fa-spin text-3xl mb-4 spotify-green"></i>
+                        <p>Analyzing playlist and getting recommendations...</p>
+                    </div>
+                `;
+                
+                // Update progress steps
+                updateProgressSteps(3);
+                
+                // Call the API endpoint with the playlist ID
+                const response = await fetch('/api/recommendations/playlist', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        playlist_id: playlistId
+                    })
+                });
+                
+                const data = await response.json();
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+                
+                // Display the recommendations
+                recommendedTracks = data.tracks;
+                document.getElementById('aiExplanation').textContent = data.explanation || 
+                    'Based on your playlist, we think you might enjoy these songs.';
+                
+                displayRecommendations(recommendedTracks);
+                
+            } catch (error) {
+                console.error('Error getting recommendations for playlist:', error);
+                document.getElementById('recommendationsPlaceholder').style.display = 'none';
+                document.getElementById('recommendationsContainer').style.display = 'block';
+                document.getElementById('recommendations').innerHTML = `
+                    <div class="bg-red-900 bg-opacity-20 p-6 rounded-xl text-center">
+                        <i class="fas fa-exclamation-circle text-red-500 text-3xl mb-3"></i>
+                        <p class="text-red-200">Error getting recommendations: ${error.message}</p>
+                        <button onclick="getRecommendationsForPlaylist('${playlistId}')" class="mt-4 px-4 py-2 bg-gray-800 rounded-lg hover:bg-gray-700">
+                            Try Again
+                        </button>
+                    </div>
+                `;
+            }
+        }
+
+        async function getRecommendationsForMethod(method) {
+            try {
+                // Show main content and loading state
+                document.getElementById('mainContent').style.display = 'block';
+                document.getElementById('recommendationsPlaceholder').style.display = 'none';
+                document.getElementById('recommendationsContainer').style.display = 'block';
+                document.getElementById('recommendations').innerHTML = `
+                    <div class="loading p-10 text-center">
+                        <i class="fas fa-spinner fa-spin text-3xl mb-4 spotify-green"></i>
+                        <p>Analyzing your ${method === 'top' ? 'top tracks' : 'recent listening history'} and getting recommendations...</p>
+                    </div>
+                `;
+                
+                // Update progress steps
+                updateProgressSteps(3);
+                
+                // Call the API endpoint based on the method
+                const endpoint = method === 'top' ? '/api/recommendations/top' : '/api/recommendations/recent';
+                const response = await fetch(endpoint, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    }
+                });
+                
+                const data = await response.json();
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+                
+                // Display the recommendations
+                recommendedTracks = data.tracks;
+                document.getElementById('aiExplanation').textContent = data.explanation || 
+                    `Based on your ${method === 'top' ? 'top tracks' : 'recent listening history'}, we think you might enjoy these songs.`;
+                
+                displayRecommendations(recommendedTracks);
+                
+            } catch (error) {
+                console.error(`Error getting recommendations for ${method}:`, error);
+                document.getElementById('recommendationsPlaceholder').style.display = 'none';
+                document.getElementById('recommendationsContainer').style.display = 'block';
+                document.getElementById('recommendations').innerHTML = `
+                    <div class="bg-red-900 bg-opacity-20 p-6 rounded-xl text-center">
+                        <i class="fas fa-exclamation-circle text-red-500 text-3xl mb-3"></i>
+                        <p class="text-red-200">Error getting recommendations: ${error.message}</p>
+                        <button onclick="getRecommendationsForMethod('${method}')" class="mt-4 px-4 py-2 bg-gray-800 rounded-lg hover:bg-gray-700">
+                            Try Again
+                        </button>
+                    </div>
+                `;
+            }
+        }
+        
+        // These functions are kept for backward compatibility but won't be used directly
+        async function loadTopTracks() {
+            try {
+                document.getElementById('topTracks').innerHTML = '<div class="loading p-10 text-center">Loading your top tracks...</div>';
+                
+                const response = await fetch('/api/top-tracks');
+                const tracks = await response.json();
+                displayTracks(tracks);
+            } catch (error) {
+                console.error('Error loading top tracks:', error);
+                document.getElementById('topTracks').innerHTML = 
+                    '<div class="bg-red-900 bg-opacity-20 p-6 rounded-xl text-center"><i class="fas fa-exclamation-circle text-red-500 text-3xl mb-3"></i><p>Error loading top tracks</p></div>';
+            }
+        }
+
+        async function loadRecentTracks() {
+            try {
+                document.getElementById('topTracks').innerHTML = '<div class="loading p-10 text-center">Loading your recent tracks...</div>';
+                
+                const response = await fetch('/api/recent-tracks');
+                const tracks = await response.json();
+                displayTracks(tracks);
+            } catch (error) {
+                console.error('Error loading recent tracks:', error);
+                document.getElementById('topTracks').innerHTML = 
+                    '<div class="bg-red-900 bg-opacity-20 p-6 rounded-xl text-center"><i class="fas fa-exclamation-circle text-red-500 text-3xl mb-3"></i><p>Error loading recent tracks</p></div>';
+            }
+        }
+
+        function displayTracks(tracks) {
+            const container = document.getElementById('topTracks');
+            container.innerHTML = '';
+
+            if (tracks.length === 0) {
+                container.innerHTML = '<div class="text-center py-10"><p class="text-gray-400">No tracks found</p></div>';
+                return;
+            }
+
+            tracks.forEach(track => {
+                tracksData[track.id] = track;
+                const trackCard = document.createElement('div');
+                trackCard.className = `track-card p-4 flex items-center gap-4 cursor-pointer ${selectedTracks.has(track.id) ? 'selected' : ''}`;
+                trackCard.onclick = () => selectTrack(track.id);
+                
+                const imageUrl = track.image || (track.album && track.album.images && track.album.images.length > 0 ? 
+                                track.album.images[0].url : '/static/default-album.png');
+                
+                trackCard.innerHTML = `
+                    <img src="${imageUrl}" 
+                         alt="${track.name}" 
+                         class="w-16 h-16 rounded shadow-lg">
+                    <div class="flex-grow">
+                        <h3 class="font-bold text-white">${track.name}</h3>
+                        <p class="text-gray-400 text-sm">${Array.isArray(track.artists) ? track.artists.join(', ') : track.artists}</p>
+                        <p class="text-gray-500 text-xs">${track.album}</p>
+                    </div>
+                    <div class="play-icon">
+                        <i class="fas ${selectedTracks.has(track.id) ? 'fa-check' : 'fa-plus'}"></i>
+                    </div>
+                `;
+                container.appendChild(trackCard);
+            });
+        }
+
+        function selectTrack(trackId) {
+            if (!tracksData[trackId]) return;
+            
+            if (selectedTracks.has(trackId)) {
+                selectedTracks.delete(trackId);
+            } else {
+                selectedTracks.add(trackId);
+            }
+
+            // Update UI
+            document.querySelectorAll('.track-card').forEach(card => {
+                const img = card.querySelector('img');
+                if (img && img.alt === tracksData[trackId].name) {
+                    card.classList.toggle('selected');
+                    const icon = card.querySelector('.play-icon i');
+                    if (icon) {
+                        icon.className = selectedTracks.has(trackId) ? 'fas fa-check' : 'fas fa-plus';
+                    }
+                }
+            });
+        }
+
+        // Display recommendations in the UI
+        function displayRecommendations(tracks) {
+            // Show the recommendations container
+            document.getElementById('recommendationsPlaceholder').classList.add('hidden');
+            document.getElementById('recommendationsContainer').classList.remove('hidden');
+            
+            if (!tracks || tracks.length === 0) {
+                document.getElementById('recommendations').innerHTML = `
+                    <div class="bg-yellow-900 bg-opacity-20 p-6 rounded-xl text-center">
+                        <i class="fas fa-exclamation-triangle text-yellow-500 text-3xl mb-3"></i>
+                        <p class="text-yellow-200">No recommendations found. Try a different selection.</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            const recommendationsHtml = tracks.map((track, index) => {
+                // Handle different track object structures
+                const imageUrl = track.album && track.album.images && track.album.images.length > 0 ? 
+                                track.album.images[0].url : '/static/default-album.png';
+                                
+                const artistsText = track.artists ? 
+                    (Array.isArray(track.artists) ? 
+                        (typeof track.artists[0] === 'string' ? track.artists.join(', ') : track.artists.map(a => a.name).join(', ')) : 
+                        track.artists) : 
+                    'Unknown Artist';
+                    
+                const albumName = track.album ? 
+                    (typeof track.album === 'string' ? track.album : track.album.name) : 
+                    'Unknown Album';
+                    
+                const externalUrl = track.external_urls ? 
+                    (track.external_urls.spotify || '#') : 
+                    '#';
+                
+                return `
+                    <div class="track-card p-4 flex items-center gap-4">
+                        <div class="text-gray-500 font-bold text-sm mr-1">${index + 1}</div>
+                        <img src="${imageUrl}" 
+                             alt="${track.name}" 
+                             class="w-16 h-16 rounded shadow-lg">
+                        <div class="flex-grow">
+                            <h3 class="font-bold text-white">${track.name}</h3>
+                            <p class="text-gray-400 text-sm">${artistsText}</p>
+                            <p class="text-gray-500 text-xs">${albumName}</p>
+                        </div>
+                        <a href="${externalUrl}" target="_blank" class="text-gray-400 hover:text-white">
+                            <i class="fas fa-external-link-alt"></i>
+                        </a>
+                    </div>
+                `;
+            }).join('');
+
+            document.getElementById('recommendations').innerHTML = recommendationsHtml;
+            
+            // Update progress steps to show we're ready to create playlist
+            updateProgressSteps(4);
+        }
+        
+        // Handle manual track-based recommendations
+        async function getRecommendations() {
+            try {
+                if (selectedTracks.size === 0) {
+                    document.getElementById('recommendationsPlaceholder').innerHTML =
+                        '<p class="text-red-400">Please select at least one track.</p>';
+                    return;
+                }
+                // Show recommendation UI
+                document.getElementById('recommendationsPlaceholder').classList.add('hidden');
+                document.getElementById('recommendationsContainer').classList.remove('hidden');
+                document.getElementById('recommendations').innerHTML =
+                    `<div class="loading p-10 text-center">
+                        <i class="fas fa-spinner fa-spin text-3xl mb-4 spotify-green"></i>
+                        <p>Generating recommendations...</p>
+                    </div>`;
+                updateProgressSteps(3);
+                // Call API
+                const response = await fetch('/api/recommendations', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({seed_tracks: Array.from(selectedTracks)})
+                });
+                const data = await response.json();
+
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+
+                recommendedTracks = data.tracks;
+                document.getElementById('aiExplanation').textContent =
+                    data.explanation || 'Here are recommendations based on your selections.';
+                displayRecommendations(recommendedTracks);
+            } catch (error) {
+                console.error('Error getting recommendations:', error);
+                document.getElementById('recommendationsPlaceholder').classList.add('hidden');
+                document.getElementById('recommendationsContainer').classList.remove('hidden');
+                document.getElementById('recommendations').innerHTML =
+                    `<div class="bg-red-900 bg-opacity-20 p-6 rounded-xl text-center">
+                        <i class="fas fa-exclamation-circle text-red-500 text-3xl mb-3"></i>
+                        <p class="text-red-200">Error getting recommendations: ${error.message}</p>
+                        <button onclick="getRecommendations()" class="mt-4 px-4 py-2 bg-gray-800 rounded-lg hover:bg-gray-700">
+                            Try Again
+                        </button>
+                    </div>`;
+            }
+        }
+
+        async function createPlaylist() {
+            if (!recommendedTracks.length) {
+                showToast('Please get recommendations first', 'error');
+                return;
+            }
+
+            // Update progress steps
+            updateProgressSteps(4);
+
+            const playlistName = prompt('Enter a name for your playlist:', `SpotAI ${currentMethod === 'playlist' ? 'Playlist' : 
+                                currentMethod === 'top' ? 'Top Tracks' : 'Recent'} Mix`);
+            if (!playlistName) return;
+
+            const description = `AI-curated playlist based on your ${currentMethod === 'playlist' ? 'playlist tracks' : 
+                                currentMethod === 'top' ? 'top tracks' : 'recent listening history'}. ${document.getElementById('aiExplanation').textContent}`;
+
+            // Show loading state
+            const createBtn = document.querySelector('button[onclick="createPlaylist()"]');
+            const originalBtnText = createBtn.innerHTML;
+            createBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i> Creating Playlist...';
+            createBtn.disabled = true;
+
+            try {
+                const response = await fetch('/api/create_playlist', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        name: playlistName,
+                        tracks: recommendedTracks.map(t => t.id),
+                        description: description
+                    })
+                });
+
+                const data = await response.json();
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+
+                // Show success message
+                document.getElementById('successMessage').classList.remove('hidden');
+                
+                // Clear selections and reset UI
+                selectedTracks.clear();
+                recommendedTracks = [];
+                document.getElementById('recommendations').innerHTML = '';
+                document.getElementById('aiExplanation').textContent = '';
+                document.getElementById('recommendationsContainer').classList.add('hidden');
+                document.getElementById('recommendationsPlaceholder').classList.remove('hidden');
+                document.querySelectorAll('.track-card').forEach(card => {
+                    card.classList.remove('selected');
+                });
+                
+                // Reset progress steps
+                updateProgressSteps(1);
+                
+            } catch (error) {
+                console.error('Error:', error);
+                showToast('Error creating playlist: ' + error.message, 'error');
+            } finally {
+                // Reset button state
+                createBtn.innerHTML = originalBtnText;
+                createBtn.disabled = false;
+            }
+        }
+        
+        // Toast notification system
+        function showToast(message, type = 'info') {
+            // Remove existing toasts
+            const existingToast = document.getElementById('toast');
+            if (existingToast) {
+                existingToast.remove();
+            }
+            
+            // Create toast element
+            const toast = document.createElement('div');
+            toast.id = 'toast';
+            toast.className = `fixed bottom-4 right-4 px-6 py-3 rounded-lg shadow-lg z-50 flex items-center ${type === 'error' ? 'bg-red-900' : 'bg-green-900'}`;
+            
+            toast.innerHTML = `
+                <i class="fas ${type === 'error' ? 'fa-exclamation-circle text-red-300' : 'fa-check-circle text-green-300'} mr-3"></i>
+                <p class="text-white">${message}</p>
+            `;
+            
+            document.body.appendChild(toast);
+            
+            // Auto remove after 3 seconds
+            setTimeout(() => {
+                toast.classList.add('opacity-0', 'transition-opacity', 'duration-500');
+                setTimeout(() => toast.remove(), 500);
+            }, 3000);
+        }
+        
+        // Initialize mobile menu toggle
+        document.querySelector('.md\\:hidden').addEventListener('click', function() {
+            const mobileMenu = document.createElement('div');
+            mobileMenu.className = 'fixed inset-0 bg-black bg-opacity-90 z-50 flex flex-col items-center justify-center';
+            mobileMenu.innerHTML = `
+                <button class="absolute top-4 right-4 text-white text-2xl">
+                    <i class="fas fa-times"></i>
+                </button>
+                <div class="flex flex-col items-center space-y-8 text-xl">
+                    <a href="/" class="text-gray-300 hover:text-white font-medium">Home</a>
+                    <a href="#" class="text-white font-medium border-b-2 border-green-500">Dashboard</a>
+                    <a href="/logout" class="text-gray-300 hover:text-white font-medium">Logout</a>
+                </div>
+            `;
+            
+            document.body.appendChild(mobileMenu);
+            
+            mobileMenu.querySelector('button').addEventListener('click', function() {
+                mobileMenu.remove();
+            });
+        });
+    </script>
+</body>
+</html>
