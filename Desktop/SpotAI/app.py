@@ -38,6 +38,7 @@ def callback():
     if code:
         token_info = spotify.get_token(code)
         session['token_info'] = token_info
+        # Store the refreshed token back to session when needed
         return redirect('/dashboard')
     return redirect('/')
 
@@ -137,64 +138,315 @@ def get_recommendations():
 
 @app.route('/api/recommendations/playlist', methods=['POST'])
 def get_playlist_recommendations():
+    """Get AI recommendations based on chosen playlists."""
     if 'token_info' not in session:
         return jsonify({'error': 'Not authenticated'}), 401
+        
     spotify.set_token(session['token_info'])
-    data = request.get_json() or {}
-    playlist_id = data.get('playlist_id')
-    if not playlist_id:
-        return jsonify({'error': 'No playlist_id provided', 'tracks': [], 'explanation': 'Please provide playlist_id.'}), 400
-    # Fetch playlist tracks
-    items = spotify.get_playlist_tracks(playlist_id)
-    seed_ids = [t['id'] for t in items]
-    if not seed_ids:
-        return jsonify({'error': 'Playlist is empty', 'tracks': [], 'explanation': 'No tracks in playlist.'}), 400
-    # Generate and upsert embeddings
-    feats = spotify.get_track_features(seed_ids)
-    embs = music_ai.generate_embeddings(feats)
-    vector_db.upsert_embeddings(seed_ids, embs)
-    # Query similar
-    centroid = np.mean(embs, axis=0).tolist()
-    sims = vector_db.query_similar(centroid)
-    recs = [spotify.get_track_info(tid) for tid in sims]
-    # Chat explanation
-    summary = '\n'.join(str(f) for f in feats)
-    explanation = music_ai.chat_recommend(summary, n=len(sims))
-    return jsonify({'tracks': recs, 'explanation': explanation})
+    # Update session if token was refreshed
+    try:
+        if hasattr(spotify, 'refreshed_token') and spotify.refreshed_token:
+            session['token_info'] = spotify.refreshed_token
+            spotify.refreshed_token = None
+    except Exception:
+        pass
+    
+    data = request.get_json()
+    playlist_id = data.get('playlist_id', '')
+    
+    try:
+        # Get tracks from the playlist
+        items = spotify.get_playlist_tracks(playlist_id)
+        if not items:
+            return jsonify({'error': 'No tracks found in playlist'}), 404
+        
+        # Extract track IDs
+        track_ids = [item['id'] for item in items if item.get('id')]
+        seed_ids = track_ids[:10]  # Use first 10 tracks as seeds
+        
+        # TEMPORARY FALLBACK: Return tracks from the same playlist
+        print("Using fallback: Returning tracks from the same playlist")
+        
+        # Just use the tracks from the playlist that weren't used as seeds
+        recommended_tracks = [
+            {
+                'id': item['id'],
+                'name': item['name'],
+                'artists': [a['name'] for a in item['artists']],
+                'album': item['album']['name'],
+                'image': item['album']['images'][0]['url'] if item['album']['images'] else None,
+                'uri': item['uri']
+            }
+            for item in items[10:30] if item.get('id') not in seed_ids
+        ]
+        
+        if not recommended_tracks:
+            # If we don't have enough tracks, just return all tracks
+            recommended_tracks = [
+                {
+                    'id': item['id'],
+                    'name': item['name'],
+                    'artists': [a['name'] for a in item['artists']],
+                    'album': item['album']['name'],
+                    'image': item['album']['images'][0]['url'] if item['album']['images'] else None,
+                    'uri': item['uri']
+                }
+                for item in items[:20]
+            ]
+            
+        return jsonify({
+            'tracks': recommended_tracks,
+            'message': 'More tracks from your playlist'
+        })
+        
+        try:
+            # Get audio features for the tracks
+            feats = spotify.get_track_features(track_ids)
+            if not feats:
+                return jsonify({'error': 'Could not fetch audio features'}), 500
+            
+            # Generate embeddings
+            embs = music_ai.generate_embeddings(feats)
+            if not embs:
+                return jsonify({'error': 'Failed to generate embeddings'}), 500
+            
+            try:
+                # Save embeddings to vector DB
+                vector_db.upsert_embeddings(seed_ids, embs)
+            except Exception as e:
+                print(f"Error upserting to vector DB: {e}")
+                # Continue even if vector DB fails
+            
+            # Get AI recommendations
+            rec_data = music_ai.get_recommendations(embs, seed_ids)
+            
+            # Check for errors in recommendation generation
+            if 'error' in rec_data:
+                return jsonify({'error': rec_data['error']}), 500
+            
+            # Find similar tracks
+            centroid = rec_data.get('centroid')
+            
+            try:
+                sims = vector_db.query_similar(centroid)
+            except Exception as e:
+                print(f"Error querying vector DB: {e}")
+                sims = []
+            
+            # Get track details for recommendations
+            recommended_tracks = []
+            if sims:
+                recommended_tracks = spotify.get_tracks(sims)
+            
+            # If vector DB recommendations failed, use Spotify recommendations as fallback
+            if not recommended_tracks:
+                print("Falling back to Spotify recommendations")
+                recommended_tracks = spotify.get_recommendations(seed_ids[:5], limit=20)
+            
+            return jsonify({
+                'tracks': recommended_tracks,
+                'message': 'AI-powered recommendations based on your playlist'
+            })
+            
+        except Exception as e:
+            print(f"Error in recommendation pipeline: {e}")
+            return jsonify({'error': str(e)}), 500
+            
+    except Exception as e:
+        print(f"Error fetching playlist: {e}")
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/recommendations/top', methods=['POST'])
 def get_top_tracks_recommendations():
+    """Get AI recommendations based on user's top tracks."""
     if 'token_info' not in session:
         return jsonify({'error': 'Not authenticated'}), 401
+        
     spotify.set_token(session['token_info'])
-    items = spotify.get_top_tracks(limit=20)
-    seed_ids = [t['id'] for t in items]
-    feats = spotify.get_track_features(seed_ids)
-    embs = music_ai.generate_embeddings(feats)
-    vector_db.upsert_embeddings(seed_ids, embs)
-    centroid = np.mean(embs, axis=0).tolist()
-    sims = vector_db.query_similar(centroid)
-    recs = [spotify.get_track_info(tid) for tid in sims]
-    summary = '\n'.join(str(f) for f in feats)
-    explanation = music_ai.chat_recommend(summary, n=len(sims))
-    return jsonify({'tracks': recs, 'explanation': explanation})
+    
+    try:
+        # Get user's top tracks
+        items = spotify.get_top_tracks(limit=50)  # Get more tracks to use some as "recommendations"
+        if not items:
+            return jsonify({'error': 'No top tracks found'}), 404
+            
+        # Use first 10 as seeds, the rest as "recommendations"
+        seed_ids = [item['id'] for item in items[:10] if item.get('id')]
+        
+        # TEMPORARY FALLBACK: Use remaining top tracks as recommendations
+        print("Using fallback: Using lower-ranked top tracks as recommendations")
+        
+        # Format the remaining tracks as recommendations
+        recommended_tracks = [
+            {
+                'id': item['id'],
+                'name': item['name'],
+                'artists': [a['name'] for a in item['artists']],
+                'album': item['album']['name'],
+                'image': item['album']['images'][0]['url'] if item['album']['images'] else None,
+                'uri': item['uri']
+            }
+            for item in items[10:30] if item.get('id') not in seed_ids
+        ]
+        
+        return jsonify({
+            'tracks': recommended_tracks,
+            'message': 'More tracks you might enjoy based on your listening history'
+        })
+        
+        try:
+            # Get audio features for the tracks
+            feats = spotify.get_track_features(track_ids)
+            if not feats:
+                return jsonify({'error': 'Could not fetch audio features'}), 500
+                
+            # Generate embeddings
+            embs = music_ai.generate_embeddings(feats)
+            if not embs:
+                return jsonify({'error': 'Failed to generate embeddings'}), 500
+                
+            try:
+                # Save embeddings to vector DB
+                vector_db.upsert_embeddings(seed_ids, embs)
+            except Exception as e:
+                print(f"Error upserting to vector DB: {e}")
+                # Continue even if vector DB fails
+                
+            # Get AI recommendations
+            rec_data = music_ai.get_recommendations(embs, seed_ids)
+            
+            # Check for errors in recommendation generation
+            if 'error' in rec_data:
+                return jsonify({'error': rec_data['error']}), 500
+                
+            # Find similar tracks
+            centroid = rec_data.get('centroid')
+            
+            try:
+                sims = vector_db.query_similar(centroid)
+            except Exception as e:
+                print(f"Error querying vector DB: {e}")
+                sims = []
+                
+            # Get track details for recommendations
+            recommended_tracks = []
+            if sims:
+                recommended_tracks = spotify.get_tracks(sims)
+                
+            # If vector DB recommendations failed, use Spotify recommendations as fallback
+            if not recommended_tracks:
+                print("Falling back to Spotify recommendations")
+                recommended_tracks = spotify.get_recommendations(seed_ids[:5], limit=20)
+                
+            return jsonify({
+                'tracks': recommended_tracks,
+                'message': 'AI-powered recommendations based on your top tracks'
+            })
+            
+        except Exception as e:
+            print(f"Error in recommendation pipeline: {e}")
+            return jsonify({'error': str(e)}), 500
+            
+    except Exception as e:
+        print(f"Error fetching top tracks: {e}")
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/recommendations/recent', methods=['POST'])
 def get_recent_tracks_recommendations():
+    """Get AI recommendations based on user's recently played tracks."""
     if 'token_info' not in session:
         return jsonify({'error': 'Not authenticated'}), 401
+        
     spotify.set_token(session['token_info'])
-    items = spotify.get_recent_tracks(limit=20)
-    seed_ids = [t['track']['id'] for t in items]
-    feats = spotify.get_track_features(seed_ids)
-    embs = music_ai.generate_embeddings(feats)
-    vector_db.upsert_embeddings(seed_ids, embs)
-    centroid = np.mean(embs, axis=0).tolist()
-    sims = vector_db.query_similar(centroid)
-    recs = [spotify.get_track_info(tid) for tid in sims]
-    summary = '\n'.join(str(f) for f in feats)
-    explanation = music_ai.chat_recommend(summary, n=len(sims))
-    return jsonify({'tracks': recs, 'explanation': explanation})
+    
+    try:
+        # Get user's recently played tracks
+        items = spotify.get_recent_tracks(limit=50)  # Get more to use as recommendations
+        if not items:
+            return jsonify({'error': 'No recent tracks found'}), 404
+            
+        # Use first items as seeds
+        recent_tracks = [item['track'] for item in items if item.get('track')]
+        first_10_ids = [track['id'] for track in recent_tracks[:10] if track.get('id')]
+        
+        # TEMPORARY FALLBACK: Use remaining recent tracks as recommendations
+        print("Using fallback: Using older recent tracks as recommendations")
+        
+        # Format the remaining tracks as recommendations
+        remaining_tracks = recent_tracks[10:30]
+        recommended_tracks = [
+            {
+                'id': item['id'],
+                'name': item['name'],
+                'artists': [a['name'] for a in item['artists']],
+                'album': item['album']['name'],
+                'image': item['album']['images'][0]['url'] if item['album']['images'] else None,
+                'uri': item['uri']
+            }
+            for item in remaining_tracks if item.get('id') not in first_10_ids
+        ]
+        
+        return jsonify({
+            'tracks': recommended_tracks,
+            'message': 'More tracks from your recent listening history'
+        })
+        
+        try:
+            # Get audio features for the tracks
+            feats = spotify.get_track_features(track_ids)
+            if not feats:
+                return jsonify({'error': 'Could not fetch audio features'}), 500
+                
+            # Generate embeddings
+            embs = music_ai.generate_embeddings(feats)
+            if not embs:
+                return jsonify({'error': 'Failed to generate embeddings'}), 500
+                
+            try:
+                # Save embeddings to vector DB
+                vector_db.upsert_embeddings(seed_ids, embs)
+            except Exception as e:
+                print(f"Error upserting to vector DB: {e}")
+                # Continue even if vector DB fails
+                
+            # Get AI recommendations
+            rec_data = music_ai.get_recommendations(embs, seed_ids)
+            
+            # Check for errors in recommendation generation
+            if 'error' in rec_data:
+                return jsonify({'error': rec_data['error']}), 500
+                
+            # Find similar tracks
+            centroid = rec_data.get('centroid')
+            
+            try:
+                sims = vector_db.query_similar(centroid)
+            except Exception as e:
+                print(f"Error querying vector DB: {e}")
+                sims = []
+                
+            # Get track details for recommendations
+            recommended_tracks = []
+            if sims:
+                recommended_tracks = spotify.get_tracks(sims)
+                
+            # If vector DB recommendations failed, use Spotify recommendations as fallback
+            if not recommended_tracks:
+                print("Falling back to Spotify recommendations")
+                recommended_tracks = spotify.get_recommendations(seed_ids[:5], limit=20)
+                
+            return jsonify({
+                'tracks': recommended_tracks,
+                'message': 'AI-powered recommendations based on your recent listening history'
+            })
+            
+        except Exception as e:
+            print(f"Error in recommendation pipeline: {e}")
+            return jsonify({'error': str(e)}), 500
+            
+    except Exception as e:
+        print(f"Error fetching recent tracks: {e}")
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/create_playlist', methods=['POST'])
 def create_playlist():

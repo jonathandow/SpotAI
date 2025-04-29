@@ -395,15 +395,24 @@
                 select.disabled = true;
 
                 const response = await fetch('/api/playlists');
-                const playlists = await response.json();
+                let data;
+                if (!response.ok) {
+                    const text = await response.text();
+                    throw new Error(text || response.statusText);
+                }
+                try {
+                    data = await response.json();
+                } catch (e) {
+                    throw new Error('Invalid JSON response: ' + (await response.text()));
+                }
                 
-                if (playlists.length === 0) {
+                if (data.length === 0) {
                     select.innerHTML = '<option value="">No playlists found</option>';
                     return;
                 }
                 
                 select.innerHTML = '<option value="">Select a playlist</option>' +
-                    playlists.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
+                    data.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
                 select.disabled = false;
                 
                 // When a playlist is selected, get recommendations directly
@@ -449,8 +458,17 @@
                         playlist_id: playlistId
                     })
                 });
+                let data;
+                if (!response.ok) {
+                    const text = await response.text();
+                    throw new Error(text || response.statusText);
+                }
+                try {
+                    data = await response.json();
+                } catch (e) {
+                    throw new Error('Invalid JSON response: ' + (await response.text()));
+                }
                 
-                const data = await response.json();
                 if (data.error) {
                     throw new Error(data.error);
                 }
@@ -502,8 +520,17 @@
                         'Content-Type': 'application/json',
                     }
                 });
+                let data;
+                if (!response.ok) {
+                    const text = await response.text();
+                    throw new Error(text || response.statusText);
+                }
+                try {
+                    data = await response.json();
+                } catch (e) {
+                    throw new Error('Invalid JSON response: ' + (await response.text()));
+                }
                 
-                const data = await response.json();
                 if (data.error) {
                     throw new Error(data.error);
                 }
@@ -537,8 +564,17 @@
                 document.getElementById('topTracks').innerHTML = '<div class="loading p-10 text-center">Loading your top tracks...</div>';
                 
                 const response = await fetch('/api/top-tracks');
-                const tracks = await response.json();
-                displayTracks(tracks);
+                let data;
+                if (!response.ok) {
+                    const text = await response.text();
+                    throw new Error(text || response.statusText);
+                }
+                try {
+                    data = await response.json();
+                } catch (e) {
+                    throw new Error('Invalid JSON response: ' + (await response.text()));
+                }
+                displayTracks(data);
             } catch (error) {
                 console.error('Error loading top tracks:', error);
                 document.getElementById('topTracks').innerHTML = 
@@ -551,8 +587,17 @@
                 document.getElementById('topTracks').innerHTML = '<div class="loading p-10 text-center">Loading your recent tracks...</div>';
                 
                 const response = await fetch('/api/recent-tracks');
-                const tracks = await response.json();
-                displayTracks(tracks);
+                let data;
+                if (!response.ok) {
+                    const text = await response.text();
+                    throw new Error(text || response.statusText);
+                }
+                try {
+                    data = await response.json();
+                } catch (e) {
+                    throw new Error('Invalid JSON response: ' + (await response.text()));
+                }
+                displayTracks(data);
             } catch (error) {
                 console.error('Error loading recent tracks:', error);
                 document.getElementById('topTracks').innerHTML = 
@@ -699,7 +744,16 @@
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({seed_tracks: Array.from(selectedTracks)})
                 });
-                const data = await response.json();
+                let data;
+                if (!response.ok) {
+                    const text = await response.text();
+                    throw new Error(text || response.statusText);
+                }
+                try {
+                    data = await response.json();
+                } catch (e) {
+                    throw new Error('Invalid JSON response: ' + (await response.text()));
+                }
 
                 if (data.error) {
                     throw new Error(data.error);
@@ -758,10 +812,15 @@
                         description: description
                     })
                 });
-
-                const data = await response.json();
-                if (data.error) {
-                    throw new Error(data.error);
+                let data;
+                if (!response.ok) {
+                    const text = await response.text();
+                    throw new Error(text || response.statusText);
+                }
+                try {
+                    data = await response.json();
+                } catch (e) {
+                    throw new Error('Invalid JSON response: ' + (await response.text()));
                 }
 
                 // Show success message

@@ -6,9 +6,11 @@ import torch.nn as nn
 from transformers import AutoTokenizer, AutoModel
 from dotenv import load_dotenv
 import openai
+import requests
 from sklearn.preprocessing import StandardScaler
 
 load_dotenv()
+import os  # required for getenv
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
 class MusicEncoder(nn.Module):
@@ -57,58 +59,58 @@ class MusicAI:
 
     def generate_embeddings(self, track_features: List[Dict[str, Any]]) -> List[List[float]]:
         """Generate embeddings for tracks using OpenAI."""
+        # Validate inputs
+        if not track_features:
+            print("No track features to generate embeddings for.")
+            return []
+        
         inputs = [str(f) for f in track_features]
-        response = openai.Embeddings.create(
-            model="text-embedding-ada-002",
-            input=inputs
-        )
-        return [d.embedding for d in response.data]
+        api_key = os.getenv("OPENAI_API_KEY")
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+        payload = {"model": "text-embedding-ada-002", "input": inputs}
+        try:
+            resp = requests.post("https://api.openai.com/v1/embeddings", headers=headers, json=payload)
+            resp.raise_for_status()
+            result = resp.json()
+            embeddings = [item.get("embedding") for item in result.get("data", [])]
+            
+            # Validate embeddings
+            for i, emb in enumerate(embeddings):
+                if not emb or any(not isinstance(val, (int, float)) or float('nan') == val for val in emb):
+                    print(f"Invalid embedding at index {i}")
+                    embeddings[i] = [0.0] * 1536  # Replace with zeros to avoid NaN errors
+            
+            return embeddings
+        except Exception as e:
+            print(f"Error generating embeddings: {e}, response: {getattr(resp, 'text', '')}")
+            return []
 
     def get_recommendations(self, embeddings: np.ndarray, seed_tracks: List[str]) -> Dict[str, Any]:
         """Get AI-enhanced music recommendations."""
-        if len(embeddings) == 0:
-            return {'error': 'No valid embeddings provided'}
-            
-        # Calculate centroid of embeddings
-        centroid = np.mean(embeddings, axis=0)
-        
-        # Generate text description of the musical style
-        style_prompt = self._generate_style_description(centroid)
-        
-        # Use OpenAI to generate recommendations
         try:
-            response = openai.ChatCompletion.create(
-                model="gpt-4",
-                messages=[
-                    {"role": "system", "content": "You are a music expert AI that provides detailed, personalized music recommendations."},
-                    {"role": "user", "content": f"Based on this musical style: {style_prompt}, suggest specific musical characteristics (danceability, energy, valence, etc.) that would make good recommendations. Focus on the audio features, not specific artists or songs."}
-                ],
-                temperature=0.7,
-                max_tokens=200
-            )
+            # Ensure all embeddings are valid
+            valid_embeddings = np.array([emb for emb in embeddings if emb is not None and len(emb) > 0])
             
-            # Extract feature targets from the AI response
-            ai_suggestions = response.choices[0].message.content
-            feature_targets = self._parse_ai_suggestions(ai_suggestions)
+            if len(valid_embeddings) == 0:
+                print("No valid embeddings found.")
+                return {"error": "No valid embeddings found"}
+                
+            # Calculate centroid of embeddings
+            centroid = np.mean(valid_embeddings, axis=0).tolist()
+            
+            # Replace any NaN values with 0.0
+            centroid = [0.0 if (not isinstance(v, (int, float)) or np.isnan(v)) else v for v in centroid]
             
             return {
-                'feature_targets': feature_targets,
-                'explanation': ai_suggestions
+                "centroid": centroid,
+                "seed_tracks": seed_tracks,
             }
-            
         except Exception as e:
-            print(f"Error getting AI recommendations: {str(e)}")
-            # Fallback to basic feature matching
-            return {
-                'feature_targets': [{
-                    'danceability': float(np.random.normal(0.5, 0.1)),
-                    'energy': float(np.random.normal(0.5, 0.1)),
-                    'valence': float(np.random.normal(0.5, 0.1)),
-                    'acousticness': float(np.random.normal(0.5, 0.1)),
-                    'instrumentalness': float(np.random.normal(0.5, 0.1))
-                }],
-                'explanation': "Based on your music taste, looking for similar energetic and rhythmic patterns."
-            }
+            print(f"Error in get_recommendations: {e}")
+            return {"error": str(e)}
 
     def _generate_style_description(self, embedding: np.ndarray) -> str:
         """Generate a text description of the musical style from embeddings."""
